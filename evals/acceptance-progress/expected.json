@@ -1,0 +1,1 @@
+{ "verdict": "escalated", "iterations": 3, "maxIterations": 4, "maxDomainRetries": 3, "fallowCommand": "true", "rejectedReasons": ["Acceptance check failed"] }

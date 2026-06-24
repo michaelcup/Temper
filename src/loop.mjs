@@ -1,0 +1,249 @@
+// The entropy-gated loop: runPlan drives the engine and the deterministic gates, returning a
+// structured verdict; runLoop is the thin Mode-A wrapper that maps the verdict to an exit code.
+import { writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { run, log, git, requireCleanRepo, stripAnsi, normalizeFinding, notify } from './sh.mjs'
+import { changedFiles, inScope, protectionViolations, addedSuppressions, fallowUnreachableNewFiles } from './gates.mjs'
+import { callCli, enginePrompt, runCritic, runCompletenessCheck } from './engine.mjs'
+import { validatePlan } from './plan.mjs'
+
+// The stable failure categories a re-prompt loop can get stuck on (R2). The category,
+// not the (drifting) message text, is the signal that the loop is not converging.
+const ALL_DOMAINS = ['no-changes', 'scope', 'protected', 'fallow-audit', 'suppression', 'acceptance', 'completeness']
+
+// Run the deterministic gates against the working tree, in cheapest-first order. Returns the
+// violation messages plus, per failure-domain, the head message (for telemetry) and a NORMALIZED
+// message (for unchanged-finding detection), and the gated `changed` file set the commit will use.
+function runGates(cfg, plan, baseSha) {
+  const violations = []
+  const fired = new Map() // failure-domain -> head message, this iteration only
+  const firedFull = new Map() // failure-domain -> NORMALIZED message, for unchanged-finding detection
+  const flag = (domain, msg) => {
+    violations.push(msg)
+    fired.set(domain, msg.split('\n')[0].slice(0, 160))
+    firedFull.set(domain, normalizeFinding(msg)) // normalized so volatile timings (fallow) don't defeat the fast-bail
+  }
+
+  let deadNewFiles = []
+  const changed = changedFiles(baseSha)
+  if (!changed.length) {
+    flag('no-changes', 'Your previous attempt made no file changes. Implement the task by editing files within scope.')
+  } else {
+    const outOfScope = changed.filter((f) => !inScope(f, plan.scope))
+    if (outOfScope.length) flag('scope', `Files changed outside the allowed scope: ${outOfScope.join(', ')}. Revert them.`)
+
+    for (const pv of protectionViolations(baseSha, plan, changed)) flag('protected', pv)
+
+    log('• gate: fallow audit --gate new-only…')
+    const audit = run(`${cfg.fallowCommand} audit --gate new-only`, { env: { FALLOW_AUDIT_BASE: baseSha } })
+    if (audit.code !== 0) {
+      const out = stripAnsi(audit.out).trim()
+      deadNewFiles = fallowUnreachableNewFiles(out)
+      flag('fallow-audit', `fallow audit failed — you introduced new entropy:\n${out}${deadNewFiles.length ? dynamicLoadHint(deadNewFiles) : ''}`)
+    }
+
+    if (cfg.forbidSuppressions) {
+      const supp = addedSuppressions(baseSha)
+      if (supp.length) {
+        flag('suppression', `You silenced a check instead of fixing it (suppression is not resolution). Remove these and fix the root cause: ${supp.join('; ')}`)
+      }
+    }
+
+    if (plan.acceptance) {
+      log(`• acceptance: ${plan.acceptance}`)
+      const a = run(plan.acceptance)
+      if (a.code !== 0) flag('acceptance', `Acceptance check failed (\`${plan.acceptance}\`):\n${stripAnsi(a.out).trim().slice(-1500)}`)
+    }
+
+    // Diff-vs-Plan completeness — only when the cheap gates already passed (don't waste a model call).
+    if (cfg.checkCompleteness && violations.length === 0) {
+      log('• completeness: does the diff implement the Plan?')
+      const comp = runCompletenessCheck(cfg, plan, baseSha)
+      if (!comp.complete) flag('completeness', `The change does not fully implement the Plan — still missing: ${comp.missing}. Complete it.`)
+    }
+  }
+  return { violations, fired, firedFull, changed, deadNewFiles }
+}
+
+// The actionable fix for a fallow dynamic-load false-positive, handed to the engine on re-prompt: a
+// new file fallow can't see as reachable is either genuinely dead (remove it) or dynamically loaded
+// (needs a .fallowrc.json entry — which is out of scope here, so stop). This keeps the engine from
+// the no-win cascade the dogfood caught: trying to add lint config, getting it scope-rejected, reverting.
+function dynamicLoadHint(files) {
+  const isAre = files.length > 1 ? 'are NEW files' : 'is a NEW file'
+  return (
+    `\n\nNOTE: ${files.join(', ')} ${isAre} this change added that fallow reports as unreachable. Resolve it HONESTLY — do NOT silence the linter:\n` +
+    '  • If genuinely unused, remove it (it may not belong in this Plan).\n' +
+    '  • If it is loaded DYNAMICALLY (a fixture, plugin, or dynamic import) and must stay, it needs a `.fallowrc.json` "entry" glob — but editing lint config is OUT OF SCOPE here and the scope/suppression gates will reject it. In that case STOP and let a human add the entry.'
+  )
+}
+
+// Track, per failure-domain, the consecutive-fail streak and how many of those were the IDENTICAL
+// finding (a stronger "the engine can't fix it" signal than the domain merely recurring).
+function updateStreaks(domainStreaks, repeatStreaks, prevFiredFull, fired, firedFull) {
+  for (const d of ALL_DOMAINS) {
+    domainStreaks.set(d, fired.has(d) ? (domainStreaks.get(d) ?? 0) + 1 : 0)
+    if (fired.has(d) && firedFull.get(d) === prevFiredFull.get(d)) repeatStreaks.set(d, (repeatStreaks.get(d) ?? 0) + 1)
+    else repeatStreaks.set(d, fired.has(d) ? 1 : 0)
+  }
+}
+
+// Commit ONLY the gated files (the `changed` set the gates validated) — NEVER `git add -A`, which
+// would sweep in any ungated file a held-out command (or anything else) dropped in the tree.
+function commitGatedChange(cfg, plan, changed) {
+  const msgFile = join(tmpdir(), `temper-msg-${process.pid}.txt`)
+  writeFileSync(msgFile, `${cfg.commitPrefix} ${plan.title}\n`)
+  run(`git add -- ${changed.map((f) => `"${f}"`).join(' ')}`)
+  run(`git commit -F "${msgFile}"`)
+  return git('rev-parse HEAD')
+}
+
+// A fallow dynamic-load false-positive can't be fixed by re-prompting (the file IS used; fallow just
+// can't see it), and the engine's attempts to work around it produce DIFFERENT findings each iteration
+// (fallow → out-of-scope config → fallow), which evades the per-domain stuck/unchanged bails. So we
+// track the flagged FILE across NON-consecutive iterations and escalate it directly, with the fix.
+function escalateDeadFile(files, baseSha, runStart, elapsed) {
+  log(`\n■ STUCK — fallow keeps reporting new file(s) as unreachable dead code: ${files.join(', ')}.`)
+  log('  This is the dynamic-load false-positive: the file is used, but not via a static import fallow')
+  log('  can follow (a fixture / plugin / dynamic import), so the engine cannot satisfy it in scope.')
+  log('  → If the file belongs, add a glob for it to .fallowrc.json "entry" and re-run; if it is truly')
+  log('    unused, drop it from the Plan.')
+  log('  → `temper explain fallow-audit` covers this gate in more detail.')
+  log(`\n  Nothing committed. Review the working tree; diff against ${baseSha.slice(0, 9)}.`)
+  log(`⏱ total ${elapsed(runStart)}`)
+}
+
+// R2: a failure-domain that fails N iterations in a row is not converging — surface
+// a structured summary to the human instead of silently burning the iteration budget.
+function escalateStuck(domain, streak, history, baseSha, runStart, elapsed) {
+  log(`\n■ STUCK — failure-domain "${domain}" failed ${streak} iterations in a row. Escalating instead of burning iterations.`)
+  log('  This is not converging; it needs your judgment — the plan, the gate, or the task may be wrong.')
+  log(`  → \`temper explain ${domain}\` says what this gate checks and how to clear it.`)
+  if (domain === 'no-changes') log("  → no edits usually means the engine isn't editing headlessly — run `temper doctor`.")
+  for (const h of history.filter((h) => h.msgs[domain])) {
+    log(`   iter ${h.i} (${(h.ms / 1000).toFixed(1)}s): ${h.msgs[domain]}`)
+  }
+  log(`\n  Nothing committed. Review the working tree; diff against ${baseSha.slice(0, 9)}.`)
+  log(`⏱ total ${elapsed(runStart)}`)
+}
+
+// Runs one Plan from `baseSha`, RETURNING a structured verdict instead of exiting.
+// This is the reusable core shared by Mode A (runLoop) and phase sequencing (runPhases)
+// and is what the eval harness scores. It commits on success; it never calls process.exit.
+export function runPlan(cfg, plan, { baseSha }) {
+  log(`▶ "${plan.title}"  base ${baseSha.slice(0, 9)}  (≤ ${cfg.maxIterations} iterations)\n`)
+  const runStart = performance.now()
+  const elapsed = (since) => `${((performance.now() - since) / 1000).toFixed(1)}s`
+
+  const domainStreaks = new Map()
+  const repeatStreaks = new Map() // consecutive iterations a domain fired with the IDENTICAL finding
+  const deadFileHits = new Map() // new file -> TOTAL iterations fallow flagged it unreachable (non-resetting)
+  let prevFiredFull = new Map()
+  const history = []
+  let prevViolations = []
+  for (let i = 1; i <= cfg.maxIterations; i++) {
+    const iterStart = performance.now()
+    log(`── iteration ${i} ──`)
+    log('• engine: implementing…')
+    callCli(cfg.engineCommand, enginePrompt(plan, prevViolations), cfg)
+
+    const { violations, fired, firedFull, changed, deadNewFiles } = runGates(cfg, plan, baseSha)
+
+    // R2 telemetry: per-iteration timing + which domains fired, plus the consecutive-fail streaks.
+    history.push({ i, ms: performance.now() - iterStart, msgs: Object.fromEntries(fired) })
+    updateStreaks(domainStreaks, repeatStreaks, prevFiredFull, fired, firedFull)
+    for (const f of deadNewFiles) deadFileHits.set(f, (deadFileHits.get(f) ?? 0) + 1)
+    prevFiredFull = firedFull
+
+    if (violations.length) {
+      log(`✗ ${violations.length} violation(s):`)
+      // Show the FULL captured finding (capped), indented — so the human can diagnose without
+      // re-running the gate by hand (Anthropic: gate errors must be specific + actionable).
+      for (const v of violations) {
+        const capped = v.length > 1200 ? v.slice(0, 1200).trimEnd() + '\n… (truncated)' : v
+        log(capped.split('\n').map((line, idx) => (idx === 0 ? `   • ${line}` : `     ${line}`)).join('\n'))
+      }
+      log('  → re-prompting\n')
+      log(`⏱ iteration ${i} took ${elapsed(iterStart)}\n`)
+      // A fallow dynamic-load false-positive on a NEW file can't be fixed in scope — escalate it
+      // directly (tracked across non-consecutive iterations, so the work-around cascade can't evade it).
+      const stuckFiles = [...deadFileHits.keys()].filter((f) => deadFileHits.get(f) >= cfg.maxUnchangedRetries)
+      if (stuckFiles.length) {
+        escalateDeadFile(stuckFiles, baseSha, runStart, elapsed)
+        return { status: 'escalated', sha: baseSha, iterations: i, seconds: elapsed(runStart), violations, stuckDomain: 'fallow-audit' }
+      }
+      // R2: a domain that recurs is not converging — escalate, don't burn iterations. Bail SOONER
+      // when the SAME finding recurs unchanged (the engine made zero progress on an identical finding).
+      const stuck = [...fired.keys()].find((d) => domainStreaks.get(d) >= cfg.maxDomainRetries || repeatStreaks.get(d) >= cfg.maxUnchangedRetries)
+      if (stuck) {
+        escalateStuck(stuck, domainStreaks.get(stuck), history, baseSha, runStart, elapsed)
+        return { status: 'escalated', sha: baseSha, iterations: i, seconds: elapsed(runStart), violations, stuckDomain: stuck }
+      }
+      prevViolations = violations
+      continue
+    }
+
+    // Capture the critic verdict so it reaches the verdict (and the morning report). A warn-level
+    // flag on a phase that still COMMITS otherwise only ever hits stdout, so a possible duplication
+    // the loop let through would be invisible the morning after — the proven review bottleneck.
+    let critic = null
+    if (cfg.criticMode !== 'off') {
+      const c = runCritic(cfg, baseSha)
+      if (c.flagged) {
+        log(`⚠ reuse-critic flagged (${c.confidence}): ${c.summary}`)
+        critic = { flagged: true, confidence: c.confidence, summary: c.summary }
+        // Duplication-of-intent is an intent call (SPEC.md) — escalate, don't auto-fix.
+        if (cfg.criticMode === 'halt' && c.confidence === 'high') {
+          log('\n■ HALT — possible duplication-of-intent needs your decision. Nothing committed; review the diff.')
+          log('  → `temper explain halted`')
+          log(`⏱ iteration ${i} took ${elapsed(iterStart)}  •  total ${elapsed(runStart)}`)
+          return { status: 'halted', sha: baseSha, iterations: i, seconds: elapsed(runStart), violations, critic }
+        }
+      }
+    }
+
+    // Held-out check: the agent never saw this, so passing the visible gates but failing
+    // here means the gates were gamed or insufficient. One-shot: escalate, never re-prompt
+    // (the research warns iterating against a hidden check just teaches gaming).
+    if (plan.heldout) {
+      const h = run(plan.heldout)
+      if (h.code === 126 || h.code === 127) {
+        // Command-not-found / not-executable is an infra error, NOT gaming — don't mislabel it.
+        log(`\n■ held-out command could not execute (exit ${h.code}): \`${plan.heldout}\`. Fix the command.`)
+        return { status: 'error', sha: baseSha, iterations: i, seconds: elapsed(runStart), violations: [`held-out command not executable: ${plan.heldout}`] }
+      }
+      if (h.code !== 0) {
+        log(`\n■ GAMED — work passed every visible gate but FAILED the held-out check \`${plan.heldout}\`.`)
+        log('  The agent never saw this check; the visible gates were gamed or insufficient. Nothing committed; review.')
+        log('  → `temper explain gamed`')
+        log(`⏱ iteration ${i} took ${elapsed(iterStart)}  •  total ${elapsed(runStart)}`)
+        return { status: 'gamed', sha: baseSha, iterations: i, seconds: elapsed(runStart), violations: [`held-out check failed: ${plan.heldout}`] }
+      }
+    }
+
+    const sha = commitGatedChange(cfg, plan, changed)
+    log(`\n✓ gate green — committed "${cfg.commitPrefix} ${plan.title}"`)
+    log(`⏱ iteration ${i} took ${elapsed(iterStart)}  •  total ${elapsed(runStart)}`)
+    return { status: 'committed', sha, iterations: i, seconds: elapsed(runStart), violations: [], critic }
+  }
+
+  log(`\n■ Reached ${cfg.maxIterations} iterations without a green gate (no single failure-domain stuck). Nothing committed; review the working tree.`)
+  log('  → `temper explain maxed`')
+  log(`⏱ total ${elapsed(runStart)}`)
+  return { status: 'maxed', sha: baseSha, iterations: cfg.maxIterations, seconds: elapsed(runStart), violations: prevViolations }
+}
+
+// Mode A: one Plan to a green gate. Thin wrapper mapping the verdict to exit codes.
+export function runLoop(cfg, plan) {
+  validatePlan(plan)
+  requireCleanRepo()
+  const v = runPlan(cfg, plan, { baseSha: git('rev-parse HEAD') })
+  notify(cfg, v.status, { summary: `temper run "${plan.title}": ${v.status}` })
+  if (v.status === 'committed') return
+  if (v.status === 'halted') process.exit(2)
+  if (v.status === 'escalated') process.exit(4)
+  if (v.status === 'gamed') process.exit(5)
+  if (v.status === 'error') process.exit(1)
+  process.exit(3)
+}

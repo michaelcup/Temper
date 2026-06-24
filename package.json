@@ -1,0 +1,21 @@
+{
+  "name": "@michaelcup/temper",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Thin, engine-agnostic, entropy-gated loop runner for AI coding. Drives Claude Code or Codex in a loop on one approved Plan and commits only work that passed a deterministic gate.",
+  "keywords": ["ai", "coding-agent", "claude-code", "codex", "llm", "loop-runner", "code-quality", "cli"],
+  "homepage": "https://michaelcup.github.io/Temper",
+  "repository": { "type": "git", "url": "git+https://github.com/michaelcup/Temper.git" },
+  "bugs": { "url": "https://github.com/michaelcup/Temper/issues" },
+  "author": "Michael Jones",
+  "license": "MIT",
+  "bin": { "temper": "bin/temper.mjs" },
+  "files": ["bin", "src", "skills", "templates", "integrations"],
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "temper": "node bin/temper.mjs",
+    "test": "node bin/temper.mjs eval && node --test test/*.test.mjs",
+    "critic-check": "node evals/critic-reliability.mjs"
+  }
+}

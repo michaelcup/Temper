@@ -1,0 +1,1 @@
+{ "verdict": "committed", "finalFiles": { "src/x.mjs": { "contains": "CORRECT" } } }

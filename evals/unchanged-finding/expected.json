@@ -1,0 +1,1 @@
+{ "verdict": "escalated", "iterations": 2, "maxIterations": 6, "maxDomainRetries": 3, "maxUnchangedRetries": 2, "rejectedReasons": ["outside the allowed scope"] }

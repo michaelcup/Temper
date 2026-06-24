@@ -1,0 +1,9 @@
+{
+  "entry": [
+    "**/*.{test,spec}.{js,mjs,cjs,jsx,ts,tsx,mts,cts}",
+    "test/**",
+    "evals/*.mjs",
+    "evals/*/engine.mjs",
+    "evals/*/repo/**"
+  ]
+}

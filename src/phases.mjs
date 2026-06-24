@@ -1,0 +1,227 @@
+// Mode B: the overnight Plan-queue. Runs ordered phase Plans, gating each against the prior
+// committed phase, with branch isolation, a resumable ledger, a global budget, and a morning
+// report. Decomposition stays a human job (ordered files), not an LLM step (ADR-0002).
+import { existsSync, readFileSync, writeFileSync, readdirSync, mkdirSync } from 'node:fs'
+import { join, dirname, resolve, basename } from 'node:path'
+import { createHash } from 'node:crypto'
+import { run, log, git, fail, requireCleanRepo, notify, state } from './sh.mjs'
+import { parsePlan, validatePlan } from './plan.mjs'
+import { runPlan } from './loop.mjs'
+
+// Shown when a queue has no phase files yet — the missing on-ramp between Mode A and Mode B.
+const PHASE_HINT =
+  'Phase files are ordered Plans (01-*.md, 02-*.md, …), each the same format as a `temper run` Plan.\n' +
+  '  Draft one with:  temper plan "<phase 1 task>" --out .temper/phases/01-first.md'
+
+function discoverPhases(dir) {
+  const root = resolve(dir) // absolute → ledger keys are invariant to how `dir` was spelled
+  if (!existsSync(root)) fail(`No phase directory at ${dir}.\n${PHASE_HINT}`)
+  return readdirSync(root)
+    .filter((f) => f.endsWith('.md'))
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true })) // 1- < 2- < 10-, not lexicographic
+    .map((f) => join(root, f))
+}
+
+// Load + shape-validate the on-disk ledger (a hand-edited or old-format file must not crash a run).
+function loadLedger(ledgerPath) {
+  if (!existsSync(ledgerPath)) return []
+  try {
+    const parsed = JSON.parse(readFileSync(ledgerPath, 'utf8'))
+    return Array.isArray(parsed) ? parsed.filter((e) => e && typeof e === 'object' && typeof e.file === 'string') : []
+  } catch {
+    log(`⚠ ignoring unreadable ledger at ${ledgerPath} (starting fresh)`)
+    return []
+  }
+}
+
+// Overnight isolation (Mode B): switch to the queue's OWN branch (a STABLE temper/<dir> name, so a
+// resume re-enters it) — never the base branch, never auto-merged — and register an exit hook that
+// ALWAYS restores `base` on ANY exit, so the next run forks from the real base (no stacked branches,
+// no stranded HEAD). Returns the branch in use (== base when not isolating).
+function setupBranchIsolation(opts, dir, base) {
+  if (!opts.overnight && !opts.branch) return base
+  const branch = typeof opts.branch === 'string' ? opts.branch : `temper/${basename(resolve(dir))}`
+  if (branch === base) return base
+  const exists = run(`git rev-parse --verify --quiet "refs/heads/${branch}"`).code === 0
+  if (run(exists ? `git checkout --quiet "${branch}"` : `git checkout --quiet -b "${branch}"`).code !== 0) {
+    fail(`Could not switch to isolation branch ${branch}.`)
+  }
+  let restored = false
+  process.on('exit', () => {
+    if (restored) return
+    restored = true
+    run('git reset --hard --quiet HEAD') // drop uncommitted failed-attempt changes…
+    run('git clean -fdq') // …and untracked out-of-scope artifacts (gitignored files like .temper/ are kept)
+    run(`git checkout --quiet "${base}"`)
+  })
+  log(`⎇ ${exists ? 'resuming the queue on' : 'isolating the queue on'} ${branch} — ${base} untouched, nothing auto-merged.`)
+  return branch
+}
+
+// Resume a phase only if it committed, its plan is unchanged (fingerprint), and its commit
+// (a real string sha) is in HEAD's history. An edited plan re-runs (no silent false-green).
+function isResumable(prior, fingerprint) {
+  return (
+    prior?.status === 'committed' &&
+    typeof prior.sha === 'string' &&
+    prior.fingerprint === fingerprint &&
+    run(`git merge-base --is-ancestor ${prior.sha} HEAD`).code === 0
+  )
+}
+
+const exitCodeFor = (status) => (status === 'halted' ? 2 : status === 'escalated' ? 4 : status === 'gamed' ? 5 : status === 'error' ? 1 : 3)
+
+// Neutralize markdown-structure chars so a plan title / violation text (which can be arbitrary
+// command output) can't break the report table or inject headings/fences. One line, no pipes, no fences.
+const mdCell = (s) => String(s).replace(/\r?\n+/g, ' ').replace(/\|/g, '\\|').replace(/`/g, "'")
+
+// The morning report (Mode B): synthesized from the ledger so it survives a detached run.
+// Facts only — what committed, what stopped it and why, what's left, where the work is.
+function writeReport(cfg, { dir, branch, base, ledger, phases, outcome, stoppedAt }) {
+  const reportPath = join(dirname(cfg.progressFile), 'report.md')
+  mkdirSync(dirname(reportPath), { recursive: true })
+  const byFile = new Map(ledger.map((e) => [e.file, e]))
+  const isolated = branch !== base
+  const shortSha = (s) => (typeof s === 'string' ? s.slice(0, 9) : '—') // a stale/old-format ledger may lack a string sha
+  const rows = phases.map(({ file, plan }, i) => {
+    const e = byFile.get(file)
+    const status = i + 1 <= stoppedAt ? e?.status ?? '—' : 'not run'
+    // Show a commit sha ONLY for committed phases — a failed verdict carries the prior base sha.
+    const sha = e?.status === 'committed' ? shortSha(e?.sha) : '—'
+    // Un-run phases have no ledger entry — fall back to the parsed plan title, not the raw filename.
+    return `| ${i + 1} | ${mdCell(e?.title ?? plan.title)} | ${status} | ${sha} | ${e?.iterations ?? '—'} | ${e?.seconds ?? '—'} |`
+  })
+  const committed = ledger.filter((e) => e.status === 'committed')
+  const committedShas = committed.map((e) => e.sha).filter((s) => typeof s === 'string')
+  const stopped = ledger.find((e) => e.status && e.status !== 'committed')
+  const remaining = phases.length - stoppedAt
+  let md = `# Temper run report\n\n`
+  md += `- **Queue:** ${mdCell(dir)}\n`
+  md += `- **Branch:** ${branch}${isolated ? ` (from ${base}; NOT merged)` : ''}\n`
+  md += `- **Outcome:** ${outcome}\n- **Generated:** ${new Date().toISOString()}\n\n`
+  md += `| # | phase | status | commit | iters | time |\n|---|---|---|---|---|---|\n${rows.join('\n')}\n\n`
+  md += `**Committed:** ${committed.length}/${phases.length}${committedShas.length ? ` — ${committedShas.map((s) => s.slice(0, 9)).join(', ')}` : ''}\n`
+  if (stopped) {
+    const gate = stopped.stuckDomain ? ` — the \`${mdCell(stopped.stuckDomain)}\` gate` : ''
+    md += `\n**Stopped at phase ${stopped.phase}** "${mdCell(stopped.title)}"${gate} (${stopped.status})\n`
+    if (Array.isArray(stopped.violations) && stopped.violations.length) md += stopped.violations.map((v) => `- ${mdCell(v)}`).join('\n') + '\n'
+  }
+  // Surface every reuse-critic flag, including a warn-level one on a phase that still COMMITTED — that
+  // signal otherwise only reached stdout, so the morning report would hide a possible duplication.
+  const flagged = ledger.filter((e) => e.critic?.flagged)
+  if (flagged.length) {
+    md += `\n**Reuse-critic flags** (possible duplication — worth a look before you merge):\n`
+    md += flagged.map((e) => `- phase ${e.phase} "${mdCell(e.title)}" (${e.status}, ${mdCell(e.critic.confidence)} confidence): ${mdCell(e.critic.summary)}`).join('\n') + '\n'
+  }
+  if (remaining > 0) md += `\n**Not run:** ${remaining} later phase(s).\n`
+  if (isolated) md += `\n**Next:** review \`${branch}\`, then (from ${base}) \`git merge --no-ff ${branch}\` if good.\n`
+  writeFileSync(reportPath, md)
+  return reportPath
+}
+
+export function runPhases(cfg, dir, opts = {}) {
+  requireCleanRepo()
+  if (run(`git check-ignore "${cfg.progressFile}"`).code !== 0) {
+    fail(`Add \`.temper/\` to your .gitignore — Temper writes its phase ledger to ${cfg.progressFile} and it must not pollute the gate.`)
+  }
+  // Snapshot + validate EVERY phase on the CURRENT (base) branch BEFORE any checkout, so the queue
+  // is invariant to what the isolation branch happens to contain, and a parse/validate failure
+  // can't strand HEAD on the isolation branch (it fails here, before any branch switch).
+  const phaseFiles = discoverPhases(dir)
+  if (!phaseFiles.length) fail(`No phase plans (*.md) in ${dir}.\n${PHASE_HINT}`)
+  const phases = phaseFiles.map((file) => {
+    const plan = parsePlan(file)
+    validatePlan(plan)
+    return { file, plan, fingerprint: createHash('sha256').update(readFileSync(file)).digest('hex').slice(0, 16) }
+  })
+  const ledgerPath = cfg.progressFile
+  const ledger = loadLedger(ledgerPath)
+  const base = git('rev-parse --abbrev-ref HEAD')
+  const branch = setupBranchIsolation(opts, dir, base)
+
+  // Global budget: a hard ceiling on the whole queue, above the per-phase maxIterations and
+  // stuck-domain escalation, so a bad night is bounded. Rate-limit sleeps don't count as work.
+  const queueStart = performance.now()
+  let totalIters = 0
+  const overBudget = () => {
+    const activeSec = (performance.now() - queueStart - state.totalSleptMs) / 1000
+    if (cfg.maxQueueSeconds && activeSec > cfg.maxQueueSeconds) return `wall-clock budget (${cfg.maxQueueSeconds}s active) exceeded`
+    if (cfg.maxQueueIterations && totalIters >= cfg.maxQueueIterations) return `iteration budget (${cfg.maxQueueIterations}) exceeded`
+    return null
+  }
+
+  let baseSha = git('rev-parse HEAD')
+  let outcome = 'all-green'
+  let n = 0
+  for (; n < phases.length; n++) {
+    const { file, plan, fingerprint } = phases[n]
+    const prior = ledger.find((e) => e.file === file)
+    if (isResumable(prior, fingerprint)) {
+      log(`▷ phase ${n + 1}/${phases.length} "${plan.title}" — already committed (${prior.sha.slice(0, 9)}), skipping`)
+      baseSha = git('rev-parse HEAD')
+      continue
+    }
+    const reason = overBudget()
+    if (reason) {
+      log(`\n■ budget reached: ${reason}. Stopping before phase ${n + 1}; ${phases.length - n} phase(s) not run.`)
+      log('  (The budget bounds this run-phases invocation; a resume starts a fresh budget — give any auto-retry loop its own ceiling.)')
+      outcome = 'budget'
+      break
+    }
+    log(`\n━━ phase ${n + 1}/${phases.length}: ${plan.title} ━━  base ${baseSha.slice(0, 9)}`)
+    const v = runPlan(cfg, plan, { baseSha })
+    totalIters += v.iterations ?? 0
+    const entry = { phase: n + 1, file, title: plan.title, fingerprint, status: v.status, sha: v.sha, iterations: v.iterations, seconds: v.seconds, branch, base, stuckDomain: v.stuckDomain, critic: v.critic, violations: v.status === 'committed' ? undefined : v.violations }
+    const idx = ledger.findIndex((e) => e.file === file)
+    if (idx >= 0) ledger[idx] = entry
+    else ledger.push(entry)
+    mkdirSync(dirname(ledgerPath), { recursive: true })
+    writeFileSync(ledgerPath, JSON.stringify(ledger, null, 2) + '\n')
+    if (v.status !== 'committed') {
+      outcome = v.status
+      log(`\n■ phase ${n + 1} ${v.status}. Earlier phases are committed; later phases were NOT run. See ${ledgerPath}.`)
+      const report = writeReport(cfg, { dir, branch, base, ledger, phases, outcome, stoppedAt: n + 1 })
+      log(`📋 report: ${report}`)
+      if (branch !== base) log(`⎇ committed work is on ${branch}; restoring you to ${base}. Review + merge it yourself.`)
+      notify(cfg, outcome, { branch, base, report, summary: `temper queue stopped at phase ${n + 1} (${outcome})` })
+      process.exit(exitCodeFor(v.status))
+    }
+    baseSha = v.sha
+  }
+  if (outcome === 'all-green') log(`\n✓ all ${phases.length} phases green. Ledger: ${ledgerPath}`)
+  const report = writeReport(cfg, { dir, branch, base, ledger, phases, outcome, stoppedAt: n })
+  log(`📋 report: ${report}`)
+  if (branch !== base) {
+    log(`⎇ work is on ${branch}; restoring you to ${base}. Review it, then merge yourself (Temper never merges):\n    git merge --no-ff ${branch}`)
+  }
+  const committedCount = ledger.filter((e) => e.status === 'committed').length
+  notify(cfg, outcome, { branch, base, report, summary: `temper queue ${outcome}: ${committedCount}/${phases.length} phases committed` })
+  if (outcome === 'budget') process.exit(6)
+}
+
+// `temper status` — read the ledger (written per-phase) so a detached/overnight run can be
+// checked at any time, including the morning after.
+export function status(cfg) {
+  const ledgerPath = cfg.progressFile
+  if (!existsSync(ledgerPath)) return log('No queue ledger found — nothing recorded yet.')
+  let ledger
+  try {
+    const parsed = JSON.parse(readFileSync(ledgerPath, 'utf8'))
+    if (!Array.isArray(parsed)) return fail(`Ledger at ${ledgerPath} is not in the expected format.`)
+    ledger = parsed.filter((e) => e && typeof e === 'object')
+  } catch {
+    return fail(`Unreadable ledger at ${ledgerPath}.`)
+  }
+  // Report the branch the RUN used (from the ledger), not whatever is checked out now — an
+  // overnight run restores you to the base branch, so HEAD would mislead.
+  const runBranch = ledger.find((e) => e.branch)?.branch
+  log(`run branch: ${runBranch ?? git('rev-parse --abbrev-ref HEAD')}`)
+  const committed = ledger.filter((e) => e.status === 'committed').length
+  log(`phases recorded: ${ledger.length}  •  committed: ${committed}`)
+  for (const e of ledger) {
+    // A commit sha ONLY for committed phases — a stopped phase's `sha` is the PRIOR base commit, not its own (matches report.md).
+    log(`  ${e.status === 'committed' ? '✓' : '■'} ${e.phase ?? '?'}. ${e.title ?? '(untitled)'} — ${e.status ?? '?'}${e.status === 'committed' && typeof e.sha === 'string' ? ` (${e.sha.slice(0, 9)})` : ''}  ${e.iterations ?? '?'} iter / ${e.seconds ?? '?'}`)
+  }
+  const reportPath = join(dirname(ledgerPath), 'report.md')
+  if (existsSync(reportPath)) log(`\n📋 full report: ${reportPath}`)
+}

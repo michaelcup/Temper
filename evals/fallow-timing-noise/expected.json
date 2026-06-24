@@ -1,0 +1,1 @@
+{ "verdict": "escalated", "iterations": 2, "maxIterations": 4, "maxDomainRetries": 3, "fallowCommand": "sh -c 'echo \"dead code: 1 issue (0.$$ s)\"; exit 1'", "rejectedReasons": ["new entropy"] }

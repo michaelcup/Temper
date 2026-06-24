@@ -1,0 +1,1 @@
+{"verdict":"escalated","maxIterations":3,"iterations":2,"fallowCommand":"sh -c 'echo newfile.mjs; echo \"Files not reachable from any entry point\"; exit 1'","rejectedReasons":[".fallowrc.json"]}

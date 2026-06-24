@@ -1,0 +1,1 @@
+{ "verdict": "committed", "finalFiles": { "src/x.mjs": { "contains": "X = 1" }, "out-of-scope.txt": { "absent": true } } }

@@ -1,0 +1,152 @@
+// The only LLM steps (ADR-0002): driving the engine/critic CLI, the rate-limit guard that
+// lets an overnight run survive the subscription cap, and the reuse + completeness critics.
+import { writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { run, log, state } from './sh.mjs'
+import { fullDiff } from './gates.mjs'
+
+// --- rate-limit resilience (Mode B) ---
+// The subscription cap is the overnight ceiling (ADR-0003). When the engine/critic
+// CLI reports it, sleep to the reset and resume — the shipped pattern from practitioners.
+function sleepSeconds(s) {
+  const ms = Math.max(0, Math.round(s * 1000))
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms) // synchronous; the runner is sync by design
+  state.totalSleptMs += ms
+}
+
+function hitRateLimit(cfg, out) {
+  if (!cfg?.rateLimit?.enabled) return false
+  // Match per LINE, anchored to the line start (after stripping quote/bullet noise). A real cap
+  // BANNER begins with one of these phrases; the engine/critic merely *mentioning* a phrase in
+  // prose — or this repo's own source containing the strings — does NOT start a line with it.
+  const pats = cfg.rateLimit.patterns.map((p) => p.toLowerCase())
+  return out
+    .toLowerCase()
+    .split('\n')
+    .some((line) => {
+      const t = line.replace(/^[\s"'>*•\-]+/, '')
+      return pats.some((p) => t.startsWith(p))
+    })
+}
+
+// Best-effort: seconds until a "resets 3pm" / "resets at 11:30" style time in the message.
+// null when nothing parseable OR the parsed time is implausibly far off (a misparse / wrong
+// day-rollover), so the caller falls back to periodic re-checks instead of one giant overshoot.
+function parseResetSeconds(text, now = new Date()) {
+  const m = text.match(/reset[s]?(?:\s+at)?\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i)
+  if (!m) return null
+  let hour = parseInt(m[1], 10)
+  const min = m[2] ? parseInt(m[2], 10) : 0
+  const ap = m[3]?.toLowerCase()
+  if (ap === 'pm' && hour < 12) hour += 12
+  if (ap === 'am' && hour === 12) hour = 0
+  if (hour > 23 || min > 59) return null
+  const target = new Date(now)
+  target.setHours(hour, min, 0, 0)
+  if (target <= now) target.setDate(target.getDate() + 1) // next occurrence
+  const secs = Math.round((target - now) / 1000)
+  return secs > 6 * 3600 ? null : secs // a reset >6h out is almost certainly a misparse → fall back
+}
+
+export function callCli(template, promptText, cfg) {
+  const promptFile = join(tmpdir(), `temper-prompt-${process.pid}-${Math.round(performance.now())}.txt`)
+  writeFileSync(promptFile, promptText)
+  const cmd = template.replace('{promptFile}', promptFile)
+  for (;;) {
+    const r = run(cmd)
+    if (!hitRateLimit(cfg, r.out)) return r
+    const rl = cfg.rateLimit
+    // Bound CUMULATIVE cap-waiting across the WHOLE run (state.totalSleptMs is global), so a persistent
+    // cap can't compound to maxIterations × maxWaitSeconds. Once spent, stop waiting everywhere.
+    const globalLeftSec = (rl.maxQueueWaitSeconds ?? Infinity) - state.totalSleptMs / 1000
+    const wait = Math.min((parseResetSeconds(r.out) ?? rl.fallbackSeconds) + rl.marginSeconds, rl.maxWaitSeconds, globalLeftSec)
+    if (wait <= 0) {
+      log(`⚠ rate-limit: cumulative cap-wait ceiling (${rl.maxQueueWaitSeconds}s) reached — giving up the wait; review the run.`)
+      return r
+    }
+    log(`\n⏸ subscription cap hit at ${new Date().toLocaleTimeString()}. Sleeping ${wait < 90 ? Math.round(wait) + 's' : Math.round(wait / 60) + 'm'} for reset, then resuming…`)
+    sleepSeconds(wait)
+  }
+}
+
+// Extract a JSON object from model output. The prompt asks for it as the LAST line, so try lines
+// from the end first (robust to braces inside string values, which a regex span is not); fall back
+// to a first-{ to last-} span for multi-line JSON. Returns null if nothing parses.
+function lastJsonObject(out) {
+  const lines = out
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean)
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (lines[i].startsWith('{') && lines[i].endsWith('}')) {
+      try {
+        return JSON.parse(lines[i])
+      } catch {
+        /* try an earlier line */
+      }
+    }
+  }
+  const s = out.indexOf('{')
+  const e = out.lastIndexOf('}')
+  if (s >= 0 && e > s) {
+    try {
+      return JSON.parse(out.slice(s, e + 1))
+    } catch {
+      /* fall through */
+    }
+  }
+  return null
+}
+
+export function enginePrompt(plan, violations) {
+  let p = 'You are implementing one task in this repository.\n\n'
+  p += 'Work ONLY within these files/globs:\n'
+  p += plan.scope.map((s) => `  - ${s}`).join('\n') + '\n\n'
+  p += 'Rules: extend existing code rather than duplicating it; delete what you replace '
+  p += '(no dead or commented-out code); never modify code inside a `temper:protect-start … '
+  p += 'temper:protect-end` region; do the task and nothing more.\n\n'
+  p += `# Task\n${plan.body}\n`
+  if (violations.length) {
+    p += '\n# Your previous attempt was REJECTED. Fix the ROOT CAUSE of each item below.\n'
+    p += 'Do NOT suppress findings, skip or weaken tests, or silence checks — fix the underlying issue.\n'
+    p += 'Show the command(s) you ran and their output as evidence the fix works.\n\n'
+    p += violations.map((v) => `- ${v}`).join('\n') + '\n'
+  }
+  return p
+}
+
+export function runCritic(cfg, baseSha) {
+  const diff = fullDiff(baseSha)
+  if (!diff.trim()) return { flagged: false, confidence: 'low', summary: 'empty diff' }
+  const prompt =
+    'You are a skeptical senior reviewer with READ access to this repository (use your search/read tools).\n' +
+    'Your ONE job: detect DUPLICATION-OF-INTENT — code in the change below that reimplements functionality ' +
+    'that ALREADY EXISTS elsewhere in this repo and should have reused or extended it instead.\n\n' +
+    'Method: for each new function / module / helper in the change, SEARCH the existing codebase for code that ' +
+    'already does the same job. Flag only genuine same-responsibility duplication; ignore style and naming.\n\n' +
+    'Respond with ONLY a JSON object as the LAST line: ' +
+    '{"flagged": boolean, "confidence": "low"|"medium"|"high", "summary": "what duplicates what, citing files"}.\n\n' +
+    `CHANGE (diff + new files):\n${diff}\n`
+  const { out } = callCli(cfg.criticCommand, prompt, cfg)
+  const v = lastJsonObject(out)
+  if (v && typeof v.flagged === 'boolean') return v
+  return { flagged: false, confidence: 'low', summary: 'critic returned no usable JSON' } // safe default: don't halt
+}
+
+// Diff-vs-Plan completeness (opt-in). Catches work that passes the gates but doesn't actually
+// implement everything the Plan asked for (silent partial completion). Fail-OPEN: an unparseable
+// or absent verdict never blocks — an LLM glitch must not stop legitimate work.
+export function runCompletenessCheck(cfg, plan, baseSha) {
+  const diff = fullDiff(baseSha)
+  const prompt =
+    'You are verifying that a change FULLY implements its Plan. Below are the PLAN and the DIFF.\n' +
+    'Does the diff implement EVERY step the Plan requires? Flag ONLY genuinely missing or only-partially-done ' +
+    'work the Plan explicitly asked for — not style, not extra polish.\n\n' +
+    'Reply with ONLY a JSON object as the LAST line: {"complete": boolean, "missing": "one sentence on what is missing, or none"}.\n\n' +
+    `PLAN:\n${plan.body}\n\nDIFF:\n${diff}\n`
+  const { out } = callCli(cfg.criticCommand, prompt, cfg)
+  const v = lastJsonObject(out)
+  if (v && typeof v.complete === 'boolean') return v
+  return { complete: true, missing: 'none' } // fail-OPEN: no usable verdict must never block legit work
+}

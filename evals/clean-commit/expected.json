@@ -1,0 +1,1 @@
+{ "verdict": "committed", "finalFiles": { "src/version.mjs": { "contains": "2.0.0" } } }
