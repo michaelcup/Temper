@@ -3,16 +3,33 @@
 import { readFileSync } from 'node:fs'
 import { run } from './sh.mjs'
 
-// Gate-gaming guard: directives an agent adds to SILENCE a check instead of
-// fixing it. Newly-added occurrences are treated as violations ("suppression is not resolution").
-const SUPPRESSION_PATTERNS = [
+// Gate-gaming guard: directives an agent adds to SILENCE a check instead of fixing it. Newly-added
+// occurrences are treated as violations ("suppression is not resolution"). Language-agnostic by
+// design — the mechanism is a diff-grep, so coverage is just this table. Add a row to cover a language.
+export const SUPPRESSION_PATTERNS = [
+  // JavaScript / TypeScript
   { name: 'fallow-ignore', re: /fallow-ignore/ },
   { name: 'eslint-disable', re: /eslint-disable/ },
+  { name: 'biome-ignore', re: /biome-ignore/ },
   { name: '@ts-ignore', re: /@ts-ignore/ },
   { name: '@ts-expect-error', re: /@ts-expect-error/ },
   { name: 'istanbul ignore', re: /istanbul\s+ignore/ },
   { name: 'c8 ignore', re: /c8\s+ignore/ },
-  { name: 'skipped/focused test', re: /\b(?:it|test|describe)\.(?:skip|only)\b|\bx(?:it|describe|test)\b/ },
+  { name: 'skipped/focused JS test', re: /\b(?:it|test|describe)\.(?:skip|only)\b|\bx(?:it|describe|test)\b/ },
+  // Python
+  { name: 'type: ignore', re: /#\s*type:\s*ignore/ },
+  { name: 'noqa', re: /#\s*noqa/ },
+  { name: 'pylint disable', re: /#\s*pylint:\s*disable/ },
+  { name: 'pragma: no cover', re: /#\s*pragma:\s*no cover/ },
+  { name: 'pytest/unittest skip', re: /@(?:pytest\.mark\.skip|unittest\.skip)|\bpytest\.skip\(/ },
+  // Rust
+  { name: 'rust #[allow]', re: /#\[\s*allow\s*\(/ },
+  { name: 'rust #[ignore]', re: /#\[\s*ignore\b/ },
+  // Go
+  { name: 'go nolint', re: /\/\/\s*nolint/ },
+  { name: 'go t.Skip', re: /\bt\.Skip(?:Now)?\(/ },
+  // Ruby
+  { name: 'rubocop disable', re: /#\s*rubocop:disable/ },
 ]
 
 // --- scope allowlist (glob → regexp) ---

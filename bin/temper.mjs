@@ -138,20 +138,21 @@ function doctor(cfg) {
   // Best-effort: the binary is on PATH — not that auth works (that surfaces on the first real call).
   const engineBin = commandBinary(cfg.engineCommand)
   const criticBin = commandBinary(cfg.criticCommand)
+  const entropyBin = commandBinary(cfg.entropyGate || cfg.fallowCommand)
   const checks = [
     ['inside a git repository', run('git rev-parse --is-inside-work-tree').code === 0],
-    [`fallow available — optional (\`${cfg.fallowCommand}\`)`, run(`${cfg.fallowCommand} --version`).code === 0],
+    [`entropy gate — optional (\`${entropyBin}\`)`, resolvesOnPath(entropyBin)],
     [`engine binary on PATH (\`${engineBin}\`)`, resolvesOnPath(engineBin)],
   ]
   if (criticBin && criticBin !== engineBin) checks.push([`critic binary on PATH (\`${criticBin}\`)`, resolvesOnPath(criticBin)])
   for (const [name, ok] of checks) log(`${ok ? '✓' : '✗'} ${name}`)
   // fallow is OPTIONAL: missing → the entropy gate is skipped (note it). Present + tests but no config →
   // the #1 footgun (the dead-code gate flags new exports/tests as "unused"); point to `temper init`.
-  if (!resolvesOnPath(commandBinary(cfg.fallowCommand))) {
-    log('\nℹ fallow is optional. Without it Temper skips the dead-code/duplication gate (it still gates on')
-    log('  scope, protected regions, suppression, your tests, and the reuse-critic). For the full entropy')
-    log('  gate:  npm i -g fallow')
-  } else if (!hasFallowConfig() && projectHasTests()) {
+  if (!resolvesOnPath(entropyBin)) {
+    log('\nℹ the entropy gate is optional. Without it Temper skips the dead-code/duplication gate (it still')
+    log('  gates on scope, protected regions, suppression, your tests, and the reuse-critic). Install fallow')
+    log('  (`npm i -g fallow`) for JS/TS, or set `entropyGate` to your language\'s tool.')
+  } else if (!cfg.entropyGate && !hasFallowConfig() && projectHasTests()) {
     log('\n⚠ No fallow config, but this project has tests. fallow\'s dead-code gate flags new')
     log('  exports / test files as "unused" without entry-point config — a new exported function')
     log('  would escalate instead of committing. Run `temper init` to scaffold one.')

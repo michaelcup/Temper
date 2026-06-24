@@ -97,6 +97,8 @@ Temper is engine-agnostic. Engines are named presets in config (`claude` and
   "criticEngine": "codex",   // which preset reviews — set to the OTHER engine
                              // for cross-model review (stronger than self-review)
   "fallowCommand": "npx fallow",
+  "entropyGate": null,       // null = `<fallowCommand> audit --gate new-only` (JS/TS). Override with ANY
+                             // command for another language (see "Languages"); `{base}` = the base SHA
   "maxIterations": 5,
   "maxDomainRetries": 3,     // escalate after N consecutive same-domain failures
   "maxUnchangedRetries": 2,  // escalate sooner when the SAME finding recurs unchanged (~1 retry)
@@ -133,6 +135,21 @@ Temper is engine-agnostic. Engines are named presets in config (`claude` and
 - **Other CLIs** (amp, opencode, …): add a preset under `engines`.
 
 The default flags are best-effort. Verify your CLI's exact headless-edit flags.
+
+## Languages
+
+Temper is **mostly language-agnostic**. Scope-lock, protected regions, the suppression guard, your
+acceptance tests, the reuse-critic, and held-out checks all work on any language. Only the **entropy
+gate** (dead code / duplication / complexity) is JS/TS-specific, because it's `fallow`.
+
+- **JS/TS:** the default — `fallow` gives the entropy gate, scoped to what the change *introduced*.
+- **Any other language:** Temper runs today on the gates above (fallow is optional). To add a
+  deterministic entropy gate too, set `entropyGate` to a tool of your choice — any command, where a
+  non-zero exit means "new entropy." `{base}` is substituted with the base commit SHA. Caveat:
+  fallow's `--gate new-only` fails only on what the change *introduced*; a tool without that scoping
+  will also flag pre-existing issues, so scope it to the diff (e.g. against `{base}`).
+- The **suppression guard** already covers JS/TS, Python, Rust, Go, and Ruby silencing directives;
+  add a pattern in `src/gates.mjs` to cover another.
 
 ## Mode B: the overnight Plan-queue
 

@@ -35,13 +35,14 @@ function runGates(cfg, plan, baseSha) {
 
     for (const pv of protectionViolations(baseSha, plan, changed)) flag('protected', pv)
 
-    if (cfg.fallowEnabled) {
-      log('• gate: fallow audit --gate new-only…')
-      const audit = run(`${cfg.fallowCommand} audit --gate new-only`, { env: { FALLOW_AUDIT_BASE: baseSha } })
+    if (cfg.entropyGateEnabled) {
+      const entropyCmd = cfg.entropyCommand.replaceAll('{base}', baseSha)
+      log(`• gate: ${entropyCmd}…`)
+      const audit = run(entropyCmd, { env: { FALLOW_AUDIT_BASE: baseSha } })
       if (audit.code !== 0) {
         const out = stripAnsi(audit.out).trim()
         deadNewFiles = fallowUnreachableNewFiles(out)
-        flag('fallow-audit', `fallow audit failed — you introduced new entropy:\n${out}${deadNewFiles.length ? dynamicLoadHint(deadNewFiles) : ''}`)
+        flag('fallow-audit', `entropy gate failed — you introduced new entropy:\n${out}${deadNewFiles.length ? dynamicLoadHint(deadNewFiles) : ''}`)
       }
     }
 
@@ -138,16 +139,18 @@ export function runPlan(cfg, plan, { baseSha }) {
   const runStart = performance.now()
   const elapsed = (since) => `${((performance.now() - since) / 1000).toFixed(1)}s`
 
-  // fallow is the deterministic entropy gate (dead code / duplication / complexity), and it is OPTIONAL:
-  // if it isn't installed, run the other gates and skip it (noted once) rather than failing the loop on a
-  // "command not found". Detected once (then reused across phases). The eval's stub fallowCommand resolves,
-  // so fixtures still exercise the gate.
-  if (cfg.fallowEnabled === undefined) {
-    cfg.fallowEnabled = resolvesOnPath(commandBinary(cfg.fallowCommand))
-    if (!cfg.fallowEnabled) {
-      log(`⚠ fallow not found (\`${cfg.fallowCommand}\`) — skipping the dead-code/duplication gate.`)
+  // The entropy gate (dead code / duplication / complexity) is the deterministic check on what the
+  // change introduced. It is PLUGGABLE (cfg.entropyGate, default fallow for JS/TS) and OPTIONAL: if its
+  // command isn't installed, run the other gates and skip it (noted once) rather than failing the loop
+  // on a "command not found". Detected once, reused across phases. The eval's stub command resolves, so
+  // fixtures still exercise the gate.
+  if (cfg.entropyGateEnabled === undefined) {
+    cfg.entropyCommand = cfg.entropyGate || `${cfg.fallowCommand} audit --gate new-only`
+    cfg.entropyGateEnabled = resolvesOnPath(commandBinary(cfg.entropyCommand))
+    if (!cfg.entropyGateEnabled) {
+      log(`⚠ entropy gate not runnable (\`${commandBinary(cfg.entropyCommand)}\`) — skipping the dead-code/duplication gate.`)
       log('  The loop still gates on scope, protected regions, suppression, your tests, and the reuse-critic.')
-      log('  Install fallow for the full entropy gate:  npm i -g fallow\n')
+      log('  Install fallow (`npm i -g fallow`) for JS/TS, or set `entropyGate` to your language\'s tool.\n')
     }
   }
 

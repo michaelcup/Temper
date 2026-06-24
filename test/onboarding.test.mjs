@@ -191,10 +191,36 @@ test('temper run skips the fallow gate gracefully when fallow is not installed',
   g(['commit', '-qm', 'seed'])
   try {
     const r = temper(dir, ['run', 'PLAN.md', '--engine', 'stub'])
-    assert.equal(r.code, 0, r.out) // commits via the other gates; fallow is skipped, not failed
-    assert.match(r.out, /fallow not found/, 'notes that fallow is missing')
+    assert.equal(r.code, 0, r.out) // commits via the other gates; the entropy gate is skipped, not failed
+    assert.match(r.out, /entropy gate not runnable/, 'notes that the entropy gate is missing')
     assert.match(r.out, /skipping the dead-code/, 'and that the entropy gate is skipped')
-    assert.doesNotMatch(r.out, /fallow audit failed/, 'a missing fallow must NOT count as a violation')
+    assert.doesNotMatch(r.out, /entropy gate failed/, 'a missing entropy gate must NOT count as a violation')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('temper run uses a custom entropyGate command when set (any language/tool)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'temper-entropygate-'))
+  const g = (a) => execFileSync('git', a, { cwd: dir })
+  mkdirSync(join(dir, 'src'))
+  writeFileSync(join(dir, 'src', 'v.mjs'), 'export const V = 0\n')
+  writeFileSync(join(dir, '.fallowrc.json'), '{"entry":["src/**"]}\n')
+  // entropyGate overrides the default fallow command — here a stand-in that prints + passes.
+  writeFileSync(
+    join(dir, 'temper.config.json'),
+    JSON.stringify({ engines: { stub: { engine: APPEND, critic: "echo '{}'" } }, engine: 'stub', fallowCommand: 'true', criticMode: 'off', entropyGate: "sh -c 'echo CUSTOM-ENTROPY-GATE'" }, null, 2),
+  )
+  writeFileSync(join(dir, 'PLAN.md'), `---\nscope:\n  - "src/**"\nacceptance: "node --check src/v.mjs"\n---\n# t\nx\n`)
+  g(['init', '-q'])
+  g(['config', 'user.email', 'a@b.c'])
+  g(['config', 'user.name', 'a'])
+  g(['add', '-A'])
+  g(['commit', '-qm', 'seed'])
+  try {
+    const r = temper(dir, ['run', 'PLAN.md', '--engine', 'stub'])
+    assert.equal(r.code, 0, r.out) // the custom gate passes (exit 0) → commits
+    assert.match(r.out, /CUSTOM-ENTROPY-GATE/, 'the configured entropyGate command is the one that runs')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

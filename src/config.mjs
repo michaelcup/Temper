@@ -23,6 +23,12 @@ export const DEFAULTS = {
   //                     OTHER engine for stronger cross-model review.
   engines: ENGINES,
   fallowCommand: 'fallow', // e.g. "npx fallow" or "node_modules/.bin/fallow"
+  // The deterministic ENTROPY GATE command (dead code / duplication / complexity). null = the default
+  // `<fallowCommand> audit --gate new-only` (JS/TS). Set this to ANY command for another language or
+  // tool — a non-zero exit is treated as "new entropy" and re-prompts the engine. `{base}` is replaced
+  // with the base commit SHA. Caveat: fallow's `--gate new-only` only fails on what the change
+  // INTRODUCED; a tool without that scoping will also flag pre-existing issues, so scope it to the diff.
+  entropyGate: null,
   maxIterations: 5,
   criticMode: 'warn', // 'warn' | 'halt' | 'off'
   forbidSuppressions: true, // reject diffs that ADD fallow-ignore / eslint-disable / @ts-ignore / skipped tests
