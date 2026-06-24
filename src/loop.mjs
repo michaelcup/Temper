@@ -3,7 +3,7 @@
 import { writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { run, log, git, requireCleanRepo, stripAnsi, normalizeFinding, notify } from './sh.mjs'
+import { run, log, git, requireCleanRepo, stripAnsi, normalizeFinding, notify, commandBinary, resolvesOnPath } from './sh.mjs'
 import { changedFiles, inScope, protectionViolations, addedSuppressions, fallowUnreachableNewFiles } from './gates.mjs'
 import { callCli, enginePrompt, runCritic, runCompletenessCheck } from './engine.mjs'
 import { validatePlan } from './plan.mjs'
@@ -35,12 +35,14 @@ function runGates(cfg, plan, baseSha) {
 
     for (const pv of protectionViolations(baseSha, plan, changed)) flag('protected', pv)
 
-    log('• gate: fallow audit --gate new-only…')
-    const audit = run(`${cfg.fallowCommand} audit --gate new-only`, { env: { FALLOW_AUDIT_BASE: baseSha } })
-    if (audit.code !== 0) {
-      const out = stripAnsi(audit.out).trim()
-      deadNewFiles = fallowUnreachableNewFiles(out)
-      flag('fallow-audit', `fallow audit failed — you introduced new entropy:\n${out}${deadNewFiles.length ? dynamicLoadHint(deadNewFiles) : ''}`)
+    if (cfg.fallowEnabled) {
+      log('• gate: fallow audit --gate new-only…')
+      const audit = run(`${cfg.fallowCommand} audit --gate new-only`, { env: { FALLOW_AUDIT_BASE: baseSha } })
+      if (audit.code !== 0) {
+        const out = stripAnsi(audit.out).trim()
+        deadNewFiles = fallowUnreachableNewFiles(out)
+        flag('fallow-audit', `fallow audit failed — you introduced new entropy:\n${out}${deadNewFiles.length ? dynamicLoadHint(deadNewFiles) : ''}`)
+      }
     }
 
     if (cfg.forbidSuppressions) {
@@ -135,6 +137,19 @@ export function runPlan(cfg, plan, { baseSha }) {
   log(`▶ "${plan.title}"  base ${baseSha.slice(0, 9)}  (≤ ${cfg.maxIterations} iterations)\n`)
   const runStart = performance.now()
   const elapsed = (since) => `${((performance.now() - since) / 1000).toFixed(1)}s`
+
+  // fallow is the deterministic entropy gate (dead code / duplication / complexity), and it is OPTIONAL:
+  // if it isn't installed, run the other gates and skip it (noted once) rather than failing the loop on a
+  // "command not found". Detected once (then reused across phases). The eval's stub fallowCommand resolves,
+  // so fixtures still exercise the gate.
+  if (cfg.fallowEnabled === undefined) {
+    cfg.fallowEnabled = resolvesOnPath(commandBinary(cfg.fallowCommand))
+    if (!cfg.fallowEnabled) {
+      log(`⚠ fallow not found (\`${cfg.fallowCommand}\`) — skipping the dead-code/duplication gate.`)
+      log('  The loop still gates on scope, protected regions, suppression, your tests, and the reuse-critic.')
+      log('  Install fallow for the full entropy gate:  npm i -g fallow\n')
+    }
+  }
 
   const domainStreaks = new Map()
   const repeatStreaks = new Map() // consecutive iterations a domain fired with the IDENTICAL finding

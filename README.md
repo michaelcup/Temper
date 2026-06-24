@@ -38,8 +38,10 @@ the only LLM steps. The critic's reliability is measured, not assumed (`npm run 
 > terminal. The deterministic core is covered by `temper eval`; the engine integration is verified
 > end-to-end with both Claude and Codex.
 
-**Prerequisites:** Node 18+, `git`, `fallow`, and `claude` or `codex` installed and logged in
-(`temper doctor` checks all of these).
+**Prerequisites:** Node 18+, `git`, and an engine (`claude` or `codex`) installed and logged in.
+`fallow` is **optional** (`npm i -g fallow`) — it adds the deterministic dead-code/duplication/complexity
+gate; without it, Temper runs the loop on the other gates and skips that one. `temper doctor` checks
+everything.
 
 ```bash
 # one-time: clone, then put `temper` on your PATH

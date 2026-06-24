@@ -171,3 +171,31 @@ test('temper run does NOT false-fail a subshell acceptance command (it runs to a
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('temper run skips the fallow gate gracefully when fallow is not installed', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'temper-nofallow-'))
+  const g = (a) => execFileSync('git', a, { cwd: dir })
+  mkdirSync(join(dir, 'src'))
+  writeFileSync(join(dir, 'src', 'v.mjs'), 'export const V = 0\n')
+  writeFileSync(join(dir, '.fallowrc.json'), '{"entry":["src/**"]}\n')
+  // fallowCommand points at a binary that does not exist → the gate is SKIPPED, not failed.
+  writeFileSync(
+    join(dir, 'temper.config.json'),
+    JSON.stringify({ engines: { stub: { engine: APPEND, critic: "echo '{}'" } }, engine: 'stub', fallowCommand: 'definitelynotfallow_zzz', criticMode: 'off' }, null, 2),
+  )
+  writeFileSync(join(dir, 'PLAN.md'), `---\nscope:\n  - "src/**"\nacceptance: "node --check src/v.mjs"\n---\n# t\nx\n`)
+  g(['init', '-q'])
+  g(['config', 'user.email', 'a@b.c'])
+  g(['config', 'user.name', 'a'])
+  g(['add', '-A'])
+  g(['commit', '-qm', 'seed'])
+  try {
+    const r = temper(dir, ['run', 'PLAN.md', '--engine', 'stub'])
+    assert.equal(r.code, 0, r.out) // commits via the other gates; fallow is skipped, not failed
+    assert.match(r.out, /fallow not found/, 'notes that fallow is missing')
+    assert.match(r.out, /skipping the dead-code/, 'and that the entropy gate is skipped')
+    assert.doesNotMatch(r.out, /fallow audit failed/, 'a missing fallow must NOT count as a violation')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

@@ -140,15 +140,18 @@ function doctor(cfg) {
   const criticBin = commandBinary(cfg.criticCommand)
   const checks = [
     ['inside a git repository', run('git rev-parse --is-inside-work-tree').code === 0],
-    [`fallow available (\`${cfg.fallowCommand}\`)`, run(`${cfg.fallowCommand} --version`).code === 0],
+    [`fallow available — optional (\`${cfg.fallowCommand}\`)`, run(`${cfg.fallowCommand} --version`).code === 0],
     [`engine binary on PATH (\`${engineBin}\`)`, resolvesOnPath(engineBin)],
   ]
   if (criticBin && criticBin !== engineBin) checks.push([`critic binary on PATH (\`${criticBin}\`)`, resolvesOnPath(criticBin)])
   for (const [name, ok] of checks) log(`${ok ? '✓' : '✗'} ${name}`)
-  // The #1 dogfood footgun: without a fallow config, the dead-code gate flags new library exports and
-  // test files as "unused" (not reachable from an entry point), so a new exported function ESCALATES
-  // instead of committing. Warn + point to `temper init`.
-  if (!hasFallowConfig() && projectHasTests()) {
+  // fallow is OPTIONAL: missing → the entropy gate is skipped (note it). Present + tests but no config →
+  // the #1 footgun (the dead-code gate flags new exports/tests as "unused"); point to `temper init`.
+  if (!resolvesOnPath(commandBinary(cfg.fallowCommand))) {
+    log('\nℹ fallow is optional. Without it Temper skips the dead-code/duplication gate (it still gates on')
+    log('  scope, protected regions, suppression, your tests, and the reuse-critic). For the full entropy')
+    log('  gate:  npm i -g fallow')
+  } else if (!hasFallowConfig() && projectHasTests()) {
     log('\n⚠ No fallow config, but this project has tests. fallow\'s dead-code gate flags new')
     log('  exports / test files as "unused" without entry-point config — a new exported function')
     log('  would escalate instead of committing. Run `temper init` to scaffold one.')
