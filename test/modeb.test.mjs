@@ -79,6 +79,20 @@ test('overnight isolates the queue on temper/<dir>, restores you to the base bra
   }
 })
 
+test('`temper overnight <dir>` is the alias — isolates on temper/<dir> + writes a report, no --overnight flag needed', () => {
+  const dir = setup(baseCfg(), [['one', 'x']])
+  try {
+    const start = gitOut(dir, ['rev-parse', '--abbrev-ref', 'HEAD'])
+    const r = temper(dir, ['overnight', '.temper/phases', '--engine', 'stub']) // no --overnight flag
+    assert.equal(r.code, 0, r.out)
+    assert.equal(gitOut(dir, ['rev-parse', '--abbrev-ref', 'HEAD']), start, 'restored to the base branch')
+    assert.equal(gitOut(dir, ['rev-parse', '--verify', 'temper/phases']).length, 40, 'work isolated on temper/phases')
+    assert.ok(existsSync(join(dir, '.temper', 'report.md')), 'overnight defaults the morning report ON')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('a stopped overnight queue resumes on the same isolation branch after the plan is fixed', () => {
   const dir = setup(baseCfg({ maxIterations: 2 }), [['one', 'x'], ['two', 'y']])
   const p2 = join(dir, '.temper', 'phases', '02-two.md')

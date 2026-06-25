@@ -3,9 +3,8 @@
 //
 // Runs in YOUR terminal, drives a subscription CLI (claude / codex), and gates
 // every iteration with `fallow audit --gate new-only` so the loop can only
-// commit work that introduced no new entropy. See SPEC.md and docs/adr/ for the
-// reasoning. Deterministic plumbing only — the engine and critic are the sole
-// LLM steps (ADR-0002).
+// commit work that introduced no new entropy. See the README for the reasoning.
+// Deterministic plumbing only — the engine and critic are the sole LLM steps.
 //
 // This file is the CLI surface: argument parsing, the `init`/`doctor` commands,
 // and the command dispatch. The machinery lives in src/ (sh, config, gates,
@@ -157,12 +156,12 @@ function doctor(cfg) {
     log('  exports / test files as "unused" without entry-point config — a new exported function')
     log('  would escalate instead of committing. Run `temper init` to scaffold one.')
   }
-  // Running inside a nested / host-managed Claude session is the other classic first-run failure: the
-  // child `claude -p` Temper spawns can't reach your subscription auth and 401s (ADR-0003).
-  if (process.env.CLAUDE_CODE_CHILD_SESSION) {
-    log('\n⚠ This looks like a nested / host-managed Claude session. Temper drives `claude -p` as a child')
-    log('  process, which needs your terminal\'s real subscription auth and will likely 401 here.')
-    log('  Run Temper from a plain terminal (ADR-0003).')
+  // Running inside a nested / host-managed agent session is the other classic first-run failure: the
+  // child `claude -p` Temper spawns may not reach your terminal's subscription auth (it can 401).
+  if (process.env.CLAUDE_CODE_CHILD_SESSION || process.env.CLAUDECODE) {
+    log('\nℹ This looks like a nested / host-managed agent session. Temper drives `claude -p` as a child')
+    log('  process; depending on the host it may not reach your terminal\'s subscription auth. If a run')
+    log('  fails to authenticate, run it from a plain terminal instead.')
   }
   log(`\nengine (${cfg.engineName}): ${cfg.engineCommand}`)
   log(`critic (${cfg.criticName}): ${cfg.criticCommand}`)
@@ -225,14 +224,16 @@ function main() {
     resolveEngines(cfg, flags.engine)
     log(`drafting engine: ${cfg.criticName} (read-only)\n`)
     runPlanDraft(cfg, arg, flags.out, 'force' in flags)
-  } else if (cmd === 'run-phases') {
+  } else if (cmd === 'overnight' || cmd === 'run-phases') {
     requireCleanRepo() // before the preflight: never scaffold a config into a dirty tree
     preflightOnboarding()
     resolveEngines(cfg, flags.engine)
     applyMaxIterations(cfg, flags)
     applyQueueBudget(cfg, flags)
     log(`engine: ${cfg.engineName}   critic: ${cfg.criticName}\n`)
-    runPhases(cfg, arg ?? cfg.phaseDir, { overnight: 'overnight' in flags, branch: flags.branch })
+    // `temper overnight` defaults the unattended path ON (own branch + morning report — the safe default
+    // for a queue you walk away from); the older `run-phases` keeps requiring an explicit --overnight.
+    runPhases(cfg, arg ?? cfg.phaseDir, { overnight: cmd === 'overnight' || 'overnight' in flags, branch: flags.branch })
   } else if (cmd === 'status') {
     status(cfg)
   } else if (cmd === 'init') {
@@ -252,18 +253,17 @@ function main() {
   } else {
     log(
       'Temper — entropy-gated loop runner\n\n' +
-        '  temper init                                       scaffold temper.config.json + a fallow config (entry-point aware)\n' +
-        '  temper plan "<task>" [--out <path>]               draft a Plan from the codebase for you to approve\n' +
-        '  temper run <plan.md> [--engine <name>] [--max-iterations <n>]  run one approved Plan to a green gate\n' +
-        '  temper run-phases <dir> [--overnight] [--branch b] [--max-iterations n] [--max-queue-seconds n] [--max-queue-iterations n]\n' +
-        '                          run ordered phase Plans, gated per phase (resumable); --overnight = Mode B (own branch + report)\n' +
-        '  temper status                                     summarize the current/last queue from the ledger\n' +
-        '  temper explain <gate>                             what a gate/verdict means + how to clear it\n' +
-        '  temper eval [--filter <id>] [--update-baseline]   run the golden-task regression suite\n' +
-        '  temper doctor [--engine <name>]                   check prerequisites\n\n' +
-        '  --overnight isolates the queue on its own branch (never main, never merged) + writes a report.\n\n' +
-        'Engines live in temper.config.json (default presets: claude, codex).\n' +
-        'Set "criticEngine" to a different engine for cross-model review.\n',
+        '  temper run <plan.md>          run one approved Plan to a green gate\n' +
+        '  temper overnight <dir>        work an ordered queue of Plans unattended — own branch + morning report\n\n' +
+        '  temper plan "<task>"          draft a Plan from the codebase for you to approve\n' +
+        '  temper init                   scaffold temper.config.json + an entry-aware fallow config\n' +
+        '  temper status                 summarize the current/last queue from the ledger\n' +
+        '  temper explain <gate>         what a gate/verdict means + how to clear it\n' +
+        '  temper doctor                 check prerequisites\n' +
+        '  temper eval                   run the golden-task regression suite\n\n' +
+        'Flags: --engine <name>, --max-iterations <n>; overnight adds --branch <b>, --max-queue-seconds/-iterations <n>.\n' +
+        'overnight isolates the queue on its own branch (never main, never merged) + writes a report.\n' +
+        'Engines live in temper.config.json (presets: claude, codex); set "criticEngine" for cross-model review.\n',
     )
   }
 }
