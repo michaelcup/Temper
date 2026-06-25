@@ -16,6 +16,7 @@
   "scripts": {
     "temper": "node bin/temper.mjs",
     "test": "node bin/temper.mjs eval && node --test test/*.test.mjs",
-    "critic-check": "node evals/critic-reliability.mjs"
+    "critic-check": "node evals/critic-reliability.mjs",
+    "trigger-check": "node evals/trigger-routing.mjs"
   }
 }
