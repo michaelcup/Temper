@@ -132,7 +132,8 @@ export function runCritic(cfg, baseSha) {
     'Method: for each new function / module / helper, SEARCH the existing codebase for code that already does ' +
     'that job. For each new or grown doc / markdown file, SEARCH for an existing doc covering the same ground ' +
     'that should have been updated in place. Flag only genuine same-responsibility duplication; ignore style ' +
-    'and naming, and NEVER suggest writing more prose.\n\n' +
+    'and naming, and NEVER suggest writing more prose. Code that imports, calls, delegates to, or re-exports ' +
+    'an existing implementation is CORRECT REUSE, not duplication — never flag it; that is the outcome you want.\n\n' +
     'Respond with ONLY a JSON object as the LAST line: ' +
     '{"flagged": boolean, "confidence": "low"|"medium"|"high", "summary": "what duplicates what, citing files"}.\n\n' +
     `CHANGE (diff + new files):\n${diff}\n`
