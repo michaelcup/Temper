@@ -124,6 +124,7 @@ function escalateStuck(domain, streak, history, baseSha, runStart, elapsed) {
   log('  This is not converging; it needs your judgment — the plan, the gate, or the task may be wrong.')
   log(`  → \`temper explain ${domain}\` says what this gate checks and how to clear it.`)
   if (domain === 'no-changes') log("  → no edits usually means the engine isn't editing headlessly — run `temper doctor`.")
+  if (domain === 'acceptance') log('  → if the SAME error recurred while the code changed, the acceptance COMMAND is likely wrong (not the code) — run it against the working tree to check.')
   for (const h of history.filter((h) => h.msgs[domain])) {
     log(`   iter ${h.i} (${(h.ms / 1000).toFixed(1)}s): ${h.msgs[domain]}`)
   }
