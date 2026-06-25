@@ -241,8 +241,8 @@ untrusted page can't steer it. It's fail-open (an unparseable verdict never bloc
    on a throwaway task first. This is the #1 *engine* failure mode.
 2. **Is `fallow` resolvable?** `temper doctor` will tell you; set `fallowCommand`
    to `npx fallow` or `node_modules/.bin/fallow` if not.
-3. **Subscription rate limits** are Mode B's ceiling: a long run can stall until
-   your cap resets. That's the cost of avoiding the metered API (ADR-0003).
+3. **Subscription rate limits** are overnight mode's ceiling: a long run can stall until
+   your cap resets. That's the cost of avoiding the metered API.
 4. **Install your project's deps first** (`npm install`). fallow warns on a missing
    `node_modules`, and an over-eager agent may chase that warning *out of scope*. The
    scope gate will (correctly) reject it, but the loop won't converge.

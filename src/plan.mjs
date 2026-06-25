@@ -57,7 +57,7 @@ export function validatePlan(plan) {
 // The upstream gate the research calls highest-leverage ("reviewing the plan gives more
 // leverage than reviewing the code"). The engine explores the repo and DRAFTS a structured
 // Plan; the human reviews/approves it, then runs `temper run`. Drafting is genuine judgment,
-// so it is a legitimate LLM step (ADR-0002) — Temper does not gate or commit here.
+// so it is a legitimate LLM step — Temper does not gate or commit here.
 function planDraftPrompt(task) {
   return (
     'You are drafting an implementation Plan for the task below, to be executed by an automated, gated loop.\n\n' +

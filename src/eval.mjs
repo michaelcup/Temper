@@ -1,7 +1,7 @@
 // The golden-fixture eval harness (R1). Each fixture under evals/<id>/ runs the REAL runPlan
 // with a deterministic STUB engine (no LLM) in an isolated temp repo, scored by final state,
 // so Temper's orchestration (the gates + the commit-vs-reject decision) never silently regresses.
-// It does NOT test the LLM critic's judgment (irreducible, ADR-0002); fixtures run with it off.
+// It does NOT test the LLM critic's judgment (irreducible); fixtures run with it off.
 import { existsSync, readFileSync, writeFileSync, readdirSync, mkdtempSync, cpSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'

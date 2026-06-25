@@ -1,6 +1,6 @@
 // Mode B: the overnight Plan-queue. Runs ordered phase Plans, gating each against the prior
 // committed phase, with branch isolation, a resumable ledger, a global budget, and a morning
-// report. Decomposition stays a human job (ordered files), not an LLM step (ADR-0002).
+// report. Decomposition stays a human job (ordered files), not an LLM step.
 import { existsSync, readFileSync, writeFileSync, readdirSync, mkdirSync } from 'node:fs'
 import { join, dirname, resolve, basename } from 'node:path'
 import { createHash } from 'node:crypto'

@@ -38,8 +38,8 @@ export const DEFAULTS = {
   commitPrefix: 'temper:',
   phaseDir: '.temper/phases', // default dir of ordered phase Plans for `run-phases`
   progressFile: '.temper/progress.json', // on-disk ledger of committed phases (enables resume)
-  // Mode B (overnight). The subscription cap — not the clock — is the throughput ceiling
-  // (ADR-0003), so the queue must survive it: detect the cap in engine output, sleep to
+  // Mode B (overnight). The subscription cap — not the clock — is the throughput ceiling,
+  // so the queue must survive it: detect the cap in engine output, sleep to
   // reset, resume. Plus a hard global budget so a bad night is bounded.
   rateLimit: {
     enabled: true,

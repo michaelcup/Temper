@@ -211,7 +211,7 @@ export function runPlan(cfg, plan, { baseSha }) {
       if (c.flagged) {
         log(`⚠ reuse-critic flagged (${c.confidence}): ${c.summary}`)
         critic = { flagged: true, confidence: c.confidence, summary: c.summary }
-        // Duplication-of-intent is an intent call (SPEC.md) — escalate, don't auto-fix.
+        // Duplication-of-intent is an intent call — escalate, don't auto-fix.
         if (cfg.criticMode === 'halt' && c.confidence === 'high') {
           log('\n■ HALT — possible duplication-of-intent needs your decision. Nothing committed; review the diff.')
           log('  → `temper explain halted`')

@@ -1,4 +1,4 @@
-// The only LLM steps (ADR-0002): driving the engine/critic CLI, the rate-limit guard that
+// The only LLM steps: driving the engine/critic CLI, the rate-limit guard that
 // lets an overnight run survive the subscription cap, and the reuse + completeness critics.
 import { writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -7,7 +7,7 @@ import { run, log, state } from './sh.mjs'
 import { fullDiff } from './gates.mjs'
 
 // --- rate-limit resilience (Mode B) ---
-// The subscription cap is the overnight ceiling (ADR-0003). When the engine/critic
+// The subscription cap is the overnight ceiling. When the engine/critic
 // CLI reports it, sleep to the reset and resume — the shipped pattern from practitioners.
 function sleepSeconds(s) {
   const ms = Math.max(0, Math.round(s * 1000))
