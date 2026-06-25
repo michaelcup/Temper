@@ -238,6 +238,7 @@ const EXPLAIN = {
   gamed: ['Held-out check failed (exit 5)', 'Work passed every visible gate but failed the hidden `heldout:` check — the visible gates were gamed or too weak.', 'Review the diff and strengthen the visible gates/tests. Never re-prompt against the held-out check.'],
   maxed: ['Max iterations (exit 3)', 'Hit the iteration cap without a green gate and without a single stuck domain.', 'Review the working tree and tighten the Plan; raise --max-iterations only if the task genuinely needs more (rarely the answer).'],
   budget: ['Over budget (exit 6, Mode B)', 'The queue hit maxQueueSeconds / maxQueueIterations.', 'Re-run to continue — a resume starts a fresh budget and the ledger skips committed phases.'],
+  direction: ['Direction check paused the queue (exit 7, overnight)', "A pre-phase direction check found the upcoming phase's APPROACH contradicts a trusted source (deprecated / superseded / wrong premise) and directionCheck.onMiss is \"pause\".", 'Review the approach against the cited source, fix the Plan, then resume. Set directionCheck.onMiss to "warn" to flag it in the report instead of pausing.'],
 }
 
 // Map the words the failure banners actually print (■ HALT / ■ GAMED / ■ Reached… / ■ STUCK) onto the

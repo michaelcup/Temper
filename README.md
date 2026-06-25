@@ -157,22 +157,22 @@ agent to update an existing doc rather than spawn a new one and to keep writing 
 guard, point `entropyGate` at the bundled recipe — `"entropyGate": "node examples/doc-gate.mjs {base}"`
 — which fails when a change adds a new markdown file, nudging "update, don't create."
 
-## Mode B: the overnight Plan-queue
+## Overnight mode (the unattended Plan-queue)
 
-`run-phases --overnight` runs an ordered queue of Plans unattended and is built to
-survive a night. The design follows the people who've actually shipped with overnight
-agents (Huntley's Ralph, HumanLayer): **sequential, one task at a time, never parallel
-fan-out, and never auto-merge.** It layers four things on the resumable phase sequencer:
+`temper overnight <dir>` runs an ordered queue of Plans unattended and is built to survive a night.
+The design follows the people who've actually shipped with overnight agents (Huntley's Ralph,
+HumanLayer): **sequential, one task at a time, never parallel fan-out, and never auto-merge.** It
+layers these on the resumable phase sequencer:
 
-- **Rate-limit survival.** The subscription cap, not the clock, is the ceiling (ADR-0003).
-  When the engine CLI reports the cap, Temper parses the reset time, sleeps, and resumes.
-  Tune via `rateLimit` in config (it deep-merges, so override one field freely).
+- **Rate-limit survival.** The subscription cap, not the clock, is the ceiling. When the engine CLI
+  reports the cap, Temper parses the reset time, sleeps, and resumes. Tune via `rateLimit` in config
+  (it deep-merges, so override one field freely).
 - **Branch isolation, no auto-merge.** The whole queue runs on a stable `temper/<dir>` branch.
   **The base branch is never touched and nothing is merged**, and you're **restored to your base
   branch** when the run ends (the work stays on `temper/<dir>` for you to review and merge). Re-running
   resumes on the same branch, skipping what already landed.
 - **A run budget.** `maxQueueSeconds` / `maxQueueIterations` (in config, or per run via
-  `--max-queue-seconds` / `--max-queue-iterations`) cap a single `run-phases` invocation (above the
+  `--max-queue-seconds` / `--max-queue-iterations`) cap a single overnight invocation (above the
   per-phase `maxIterations` + stuck-domain escalation). Over budget ⇒ stop, exit 6. The budget is
   **per invocation**: a resume starts a fresh budget, so give any auto-retry loop its own ceiling.
 - **A morning report.** `.temper/report.md` (what committed, what stopped it and why,
@@ -180,6 +180,10 @@ fan-out, and never auto-merge.** It layers four things on the resumable phase se
 - **A notify hook.** Set `notifyCommand` to be pinged on the terminal outcome (done, or
   escalated/gamed/over-budget and needs you), via `$TEMPER_EVENT` / `$TEMPER_SUMMARY` /
   `$TEMPER_BRANCH` / `$TEMPER_BASE` / `$TEMPER_REPORT`. Wire it to ntfy, Slack, or `osascript`.
+- **A direction check (opt-in).** The per-iteration gates check *did we do it right*; this checks
+  *are we doing the right thing*. Before a phase, Temper can ground its APPROACH against a trust-list
+  you supply and flag work built on a deprecated/superseded/contradicted premise before it compounds
+  across the night. Off by default — see below.
 
 **Setting up the queue.** Phase files are ordered Plans (`01-*.md`, `02-*.md`, …), each the same
 format as a `temper run` Plan. Draft them with `temper plan` and `--out`:
@@ -189,15 +193,14 @@ mkdir -p .temper/phases
 temper plan "phase 1: extract the slug helper"  --out .temper/phases/01-slug.md
 temper plan "phase 2: use it in the router"     --out .temper/phases/02-router.md
 # review each, then run the queue:
-temper run-phases .temper/phases --overnight
+temper overnight .temper/phases
 ```
 
-Run it detached in your own terminal (ADR-0003: it needs your real subscription auth, so
-no cloud/host session):
+Run it detached in your own terminal (it needs your real subscription auth, so no cloud/host session):
 
 ```bash
 # tmux survives SSH drops / closing the laptop lid (on a remote host); or use nohup
-tmux new -s temper 'temper run-phases .temper/phases --overnight > temper.log 2>&1'
+tmux new -s temper 'temper overnight .temper/phases > temper.log 2>&1'
 # …in the morning:
 temper status
 git log temper/<branch>           # review, then merge yourself
@@ -206,6 +209,23 @@ git log temper/<branch>           # review, then merge yourself
 The failure policy is **stop the queue**: a failing phase halts the run with earlier phases
 committed; fix it and re-run (the ledger skips what already landed). Decomposition (the ordered
 phase files) and the final merge stay **human jobs**, the two places judgment matters most.
+
+**Direction check (opt-in).** For a long queue against a fast-moving framework, point it at your
+trusted sources so it flags work built on a superseded approach *before* it compounds. It stays off
+until you give it sources:
+
+```jsonc
+"directionCheck": {
+  "enabled": true,
+  "sources": ["docs/architecture.md", "https://your-framework.dev/docs/migration"], // local paths + URLs
+  "every": 1,          // check every Nth phase (1 = every phase)
+  "onMiss": "warn"     // "warn": flag it in the report · "pause": stop the queue before the phase (exit 7)
+}
+```
+
+The check is one bounded question to the critic engine, grounded **only** in your sources (local files
+are read directly; URLs are fetched only if the engine has web tools) — never the open web, so an
+untrusted page can't steer it. It's fail-open (an unparseable verdict never blocks) and overnight-only.
 
 ## First-run checklist (the things most likely to bite)
 

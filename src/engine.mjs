@@ -159,3 +159,27 @@ export function runCompletenessCheck(cfg, plan, baseSha) {
   if (v && typeof v.complete === 'boolean') return v
   return { complete: true, missing: 'none' } // fail-OPEN: no usable verdict must never block legit work
 }
+
+// Direction check (overnight, opt-in). The per-iteration gates check "did we do it RIGHT"; this checks
+// "are we doing the RIGHT thing" BEFORE a phase runs — grounding the phase's APPROACH against a user-supplied
+// trust-list (local doc paths the engine reads directly; URLs it fetches only if it has web tools). Flags
+// ONLY a concrete, SOURCED wrong-direction (deprecated / superseded / removed / contradicted premise), never
+// style or scope. Fail-OPEN: no usable verdict ⇒ sound (must never block an unattended queue on an LLM glitch).
+export function runDirectionCheck(cfg, plan) {
+  const prompt =
+    'You are checking whether a planned change takes the RIGHT APPROACH — not whether it is well-written, but ' +
+    'whether its PREMISE is sound and current. Below is the PLAN for an upcoming task.\n\n' +
+    'Ground your judgment ONLY in these trusted sources (read local file paths directly; fetch URLs only if you ' +
+    'have web tools). Do NOT free-browse the open web. If the sources are silent on this plan, return sound:true:\n' +
+    cfg.directionCheck.sources.map((s) => `  - ${s}`).join('\n') + '\n\n' +
+    'Flag a direction-miss ONLY if a trusted source shows the plan relies on something deprecated, superseded, ' +
+    'removed, or contradicted (a gone API, an outdated pattern, a false assumption). NEVER flag style, scope, ' +
+    'naming, or "could be better" — only a concrete, sourced wrong-direction.\n\n' +
+    'Reply with ONLY a JSON object as the LAST line, no prose: ' +
+    '{"sound": boolean, "concern": "one sentence, or none", "source": "which trusted source shows it, or none"}.\n\n' +
+    `PLAN:\n${plan.body}\n`
+  const { out } = callCli(cfg.criticCommand, prompt, cfg)
+  const v = lastJsonObject(out)
+  if (v && typeof v.sound === 'boolean') return { sound: v.sound, concern: v.concern ?? 'none', source: v.source ?? 'none' }
+  return { sound: true, concern: 'none', source: 'none' } // fail-OPEN: no usable verdict must never block the queue
+}

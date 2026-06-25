@@ -58,6 +58,16 @@ export const DEFAULTS = {
   // needs you). Best-effort; receives TEMPER_EVENT / TEMPER_SUMMARY / TEMPER_BRANCH / TEMPER_BASE /
   // TEMPER_REPORT as env vars. e.g. "curl -d \"$TEMPER_SUMMARY\" ntfy.sh/my-topic". null = off.
   notifyCommand: null,
+  // Direction check (overnight, opt-in, OFF by default). The per-iteration gates check "did we do it
+  // RIGHT"; this checks "are we doing the RIGHT thing" BEFORE each phase — grounding the phase's APPROACH
+  // against a TRUST-LIST you supply (local doc paths and/or URLs: official docs, a migration guide, your
+  // ADRs/SPEC). Catches work built on a deprecated/superseded/contradicted premise before it compounds
+  // across an unattended queue. The check is an LLM/web judgment delegated to the critic engine (zero new
+  // dep: it reads local source files directly, and fetches URLs only if the engine has web tools). Fires
+  // ONLY when `enabled` AND `sources` is non-empty, on a deterministic cadence (every Nth phase, 0-indexed
+  // so phase 1 is always checked). onMiss: 'warn' (surface in the morning report) | 'pause' (stop the queue
+  // before the phase). Fail-OPEN: an unparseable verdict never blocks.
+  directionCheck: { enabled: false, sources: [], every: 1, onMiss: 'warn' },
 }
 
 export function loadConfig() {
@@ -71,6 +81,7 @@ export function loadConfig() {
       ...user,
       engines: { ...DEFAULTS.engines, ...(user.engines ?? {}) },
       rateLimit: { ...DEFAULTS.rateLimit, ...(user.rateLimit ?? {}) },
+      directionCheck: { ...DEFAULTS.directionCheck, ...(user.directionCheck ?? {}) },
     }
   } catch (e) {
     fail(`Could not parse temper.config.json: ${e.message}`)

@@ -7,6 +7,7 @@ import { createHash } from 'node:crypto'
 import { run, log, git, fail, requireCleanRepo, notify, state } from './sh.mjs'
 import { parsePlan, validatePlan } from './plan.mjs'
 import { runPlan } from './loop.mjs'
+import { runDirectionCheck } from './engine.mjs'
 
 // Shown when a queue has no phase files yet — the missing on-ramp between Mode A and Mode B.
 const PHASE_HINT =
@@ -113,6 +114,13 @@ function writeReport(cfg, { dir, branch, base, ledger, phases, outcome, stoppedA
     md += `\n**Reuse-critic flags** (possible duplication — worth a look before you merge):\n`
     md += flagged.map((e) => `- phase ${e.phase} "${mdCell(e.title)}" (${e.status}, ${mdCell(e.critic.confidence)} confidence): ${mdCell(e.critic.summary)}`).join('\n') + '\n'
   }
+  // Surface every direction concern (the "wrong thing" axis) — including on a phase that still COMMITTED
+  // under onMiss:'warn', so the morning report flags a possibly-misdirected approach before you merge.
+  const offTrack = ledger.filter((e) => e.direction && e.direction.sound === false)
+  if (offTrack.length) {
+    md += `\n**Direction concerns** (approach may be on the wrong track — review before you merge):\n`
+    md += offTrack.map((e) => `- phase ${e.phase} "${mdCell(e.title)}" (${e.status}, source: ${mdCell(e.direction.source)}): ${mdCell(e.direction.concern)}`).join('\n') + '\n'
+  }
   if (remaining > 0) md += `\n**Not run:** ${remaining} later phase(s).\n`
   if (isolated) md += `\n**Next:** review \`${branch}\`, then (from ${base}) \`git merge --no-ff ${branch}\` if good.\n`
   writeFileSync(reportPath, md)
@@ -169,9 +177,38 @@ export function runPhases(cfg, dir, opts = {}) {
       break
     }
     log(`\n━━ phase ${n + 1}/${phases.length}: ${plan.title} ━━  base ${baseSha.slice(0, 9)}`)
+    // Direction check (opt-in, overnight only): BEFORE implementing, ground the phase's APPROACH against the
+    // configured trust-list — the "are we doing the RIGHT thing" axis the per-iteration gates can't see.
+    // Deterministic cadence (every Nth phase, 0-indexed so phase 1 is always checked); fail-open. 'warn'
+    // surfaces in the morning report; 'pause' stops the queue before the phase so a wrong premise can't compound.
+    let direction
+    const dc = cfg.directionCheck
+    if (opts.overnight && dc.enabled && dc.sources.length && n % dc.every === 0) {
+      log(`• direction check: grounding the approach against ${dc.sources.length} trusted source(s)…`)
+      const d = runDirectionCheck(cfg, plan)
+      if (!d.sound) {
+        direction = d
+        log(`⚠ direction concern (${mdCell(d.source)}): ${mdCell(d.concern)}`)
+        if (dc.onMiss === 'pause') {
+          const pausedEntry = { phase: n + 1, file, title: plan.title, fingerprint, status: 'direction-paused', branch, base, direction }
+          const pidx = ledger.findIndex((e) => e.file === file)
+          if (pidx >= 0) ledger[pidx] = pausedEntry
+          else ledger.push(pausedEntry)
+          mkdirSync(dirname(ledgerPath), { recursive: true })
+          writeFileSync(ledgerPath, JSON.stringify(ledger, null, 2) + '\n')
+          outcome = 'direction'
+          log(`\n■ paused before phase ${n + 1} (directionCheck.onMiss: pause). Earlier phases are committed; ${phases.length - n} phase(s) not run.`)
+          const report = writeReport(cfg, { dir, branch, base, ledger, phases, outcome, stoppedAt: n + 1 })
+          log(`📋 report: ${report}`)
+          if (branch !== base) log(`⎇ committed work is on ${branch}; restoring you to ${base}. Review the approach, then resume.`)
+          notify(cfg, outcome, { branch, base, report, summary: `temper queue paused at phase ${n + 1} (direction concern)` })
+          process.exit(7)
+        }
+      }
+    }
     const v = runPlan(cfg, plan, { baseSha })
     totalIters += v.iterations ?? 0
-    const entry = { phase: n + 1, file, title: plan.title, fingerprint, status: v.status, sha: v.sha, iterations: v.iterations, seconds: v.seconds, branch, base, stuckDomain: v.stuckDomain, critic: v.critic, violations: v.status === 'committed' ? undefined : v.violations }
+    const entry = { phase: n + 1, file, title: plan.title, fingerprint, status: v.status, sha: v.sha, iterations: v.iterations, seconds: v.seconds, branch, base, stuckDomain: v.stuckDomain, critic: v.critic, direction, violations: v.status === 'committed' ? undefined : v.violations }
     const idx = ledger.findIndex((e) => e.file === file)
     if (idx >= 0) ledger[idx] = entry
     else ledger.push(entry)

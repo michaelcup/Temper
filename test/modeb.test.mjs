@@ -93,6 +93,64 @@ test('`temper overnight <dir>` is the alias — isolates on temper/<dir> + write
   }
 })
 
+test('overnight direction check (warn) surfaces a concern in the report without blocking the commit', () => {
+  const dir = setup(
+    baseCfg({
+      engines: { stub: { engine: APPEND_ENGINE, critic: `echo '{"sound":false,"concern":"relies on a removed API","source":"docs/api.md"}'` } },
+      directionCheck: { enabled: true, sources: ['docs/api.md'], every: 1, onMiss: 'warn' },
+    }),
+    [['one', 'x']],
+  )
+  try {
+    const r = temper(dir, ['overnight', '.temper/phases', '--engine', 'stub'])
+    assert.equal(r.code, 0, r.out) // warn does NOT block — the phase still commits
+    assert.match(r.out, /direction concern/, 'logs the concern')
+    const report = readFileSync(join(dir, '.temper', 'report.md'), 'utf8')
+    assert.match(report, /Direction concerns/, 'report surfaces the concern block')
+    assert.match(report, /relies on a removed API/, 'with the concern text + its source')
+    const gitLog = execFileSync('git', ['log', '--oneline', 'temper/phases'], { cwd: dir, encoding: 'utf8' })
+    assert.equal((gitLog.match(/temper:/g) || []).length, 1, 'phase still committed despite the warn')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('overnight direction check (pause) stops the queue BEFORE the phase — nothing committed (exit 7)', () => {
+  const dir = setup(
+    baseCfg({
+      engines: { stub: { engine: APPEND_ENGINE, critic: `echo '{"sound":false,"concern":"superseded pattern","source":"SPEC.md"}'` } },
+      directionCheck: { enabled: true, sources: ['SPEC.md'], every: 1, onMiss: 'pause' },
+    }),
+    [['one', 'x'], ['two', 'y']],
+  )
+  try {
+    const r = temper(dir, ['overnight', '.temper/phases', '--engine', 'stub'])
+    assert.equal(r.code, 7, r.out) // paused before phase 1
+    assert.match(r.out, /paused before phase 1/, 'stops at the first phase, before running it')
+    const gitLog = execFileSync('git', ['log', '--oneline', 'temper/phases'], { cwd: dir, encoding: 'utf8' })
+    assert.equal((gitLog.match(/temper:/g) || []).length, 0, 'no phase committed — paused before running')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('direction check is OFF without a trust-list — overnight runs normally even with enabled:true', () => {
+  const dir = setup(
+    baseCfg({
+      engines: { stub: { engine: APPEND_ENGINE, critic: `echo '{"sound":false,"concern":"x","source":"y"}'` } },
+      directionCheck: { enabled: true, sources: [], every: 1, onMiss: 'pause' }, // enabled but NO sources
+    }),
+    [['one', 'x']],
+  )
+  try {
+    const r = temper(dir, ['overnight', '.temper/phases', '--engine', 'stub'])
+    assert.equal(r.code, 0, r.out) // no sources → check never fires → normal commit
+    assert.doesNotMatch(r.out, /direction concern/, 'an empty trust-list keeps the feature dormant')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('a stopped overnight queue resumes on the same isolation branch after the plan is fixed', () => {
   const dir = setup(baseCfg({ maxIterations: 2 }), [['one', 'x'], ['two', 'y']])
   const p2 = join(dir, '.temper', 'phases', '02-two.md')
