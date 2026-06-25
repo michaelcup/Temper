@@ -225,3 +225,30 @@ test('temper run uses a custom entropyGate command when set (any language/tool)'
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('the bundled doc-sprawl recipe (examples/doc-gate.mjs) rejects a new markdown file via entropyGate', () => {
+  const DOCGATE = join(dirname(fileURLToPath(import.meta.url)), '..', 'examples', 'doc-gate.mjs')
+  const dir = mkdtempSync(join(tmpdir(), 'temper-docgate-'))
+  const g = (a) => execFileSync('git', a, { cwd: dir })
+  mkdirSync(join(dir, 'src'))
+  writeFileSync(join(dir, 'src', 'v.mjs'), 'export const V = 0\n')
+  // stub "engine" that spawns a NEW doc — exactly the sprawl the recipe should catch.
+  const MAKE_DOC = `sh -c 'mkdir -p docs && echo "# extra" > docs/extra.md'`
+  writeFileSync(
+    join(dir, 'temper.config.json'),
+    JSON.stringify({ engines: { stub: { engine: MAKE_DOC, critic: "echo '{}'" } }, engine: 'stub', criticMode: 'off', maxUnchangedRetries: 1, entropyGate: `node ${DOCGATE} {base}` }, null, 2),
+  )
+  writeFileSync(join(dir, 'PLAN.md'), `---\nscope:\n  - "docs/**"\n  - "src/**"\nacceptance: "node --check src/v.mjs"\n---\n# t\nx\n`)
+  g(['init', '-q'])
+  g(['config', 'user.email', 'a@b.c'])
+  g(['config', 'user.name', 'a'])
+  g(['add', '-A'])
+  g(['commit', '-qm', 'seed'])
+  try {
+    const r = temper(dir, ['run', 'PLAN.md', '--engine', 'stub'])
+    assert.notEqual(r.code, 0, 'a net-new doc must not be committed — the recipe rejects it') // escalates, not commits
+    assert.match(r.out, /doc sprawl/, 'the bundled doc-gate fires on the new markdown file')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

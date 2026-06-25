@@ -151,6 +151,12 @@ gate** (dead code / duplication / complexity) is JS/TS-specific, because it's `f
 - The **suppression guard** already covers JS/TS, Python, Rust, Go, and Ruby silencing directives;
   add a pattern in `src/gates.mjs` to cover another.
 
+**Prose counts too.** The same anti-entropy discipline applies to docs: the engine prompt tells the
+agent to update an existing doc rather than spawn a new one and to keep writing terse, and the
+**reuse-critic** now also flags a new doc that restates one that already exists. For a deterministic
+guard, point `entropyGate` at the bundled recipe — `"entropyGate": "node examples/doc-gate.mjs {base}"`
+— which fails when a change adds a new markdown file, nudging "update, don't create."
+
 ## Mode B: the overnight Plan-queue
 
 `run-phases --overnight` runs an ordered queue of Plans unattended and is built to

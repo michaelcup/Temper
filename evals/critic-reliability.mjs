@@ -9,8 +9,8 @@
 //   node evals/critic-reliability.mjs [--engine <name>]
 //
 // It must FLAG a genuine duplication-of-intent (incl. semantic — different code, same job) and must
-// NOT flag a no-op refactor, a genuinely-new function, or correct reuse. Expected baseline: 6/6,
-// 0 flips. See RESEARCH.md (round R4).
+// NOT flag a no-op refactor, a genuinely-new function, correct reuse, or a genuinely-new doc.
+// Expected baseline: 8/8, 0 flips.
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
@@ -26,6 +26,7 @@ cfg.rateLimit = { ...cfg.rateLimit, enabled: false }
 const SLUG = "export const slugify = (s) => String(s).toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')\n"
 const CAP = 'export function capitalize(s) {\n  return s.charAt(0).toUpperCase() + s.slice(1)\n}\n'
 const CLAMP = 'export const clamp = (n, min, max) => Math.min(Math.max(n, min), max)\n'
+const SETUP_DOC = '# Setup\n\nInstall the deps with `npm install`, copy `.env.example` to `.env`, then run `npm start`. The app serves on port 3000.\n'
 
 // Each case: a committed base + an uncommitted change. expect = should the critic flag duplication?
 const cases = [
@@ -37,6 +38,9 @@ const cases = [
   { id: 'TN-noop-refactor (flip-prone)', expect: false, base: { 'src/calc.mjs': 'export function add(a, b) {\n  const result = a + b\n  return result\n}\n' }, change: { 'src/calc.mjs': 'export function add(a, b) {\n  const sum = a + b\n  return sum\n}\n' } },
   { id: 'TN-genuine-new', expect: false, base: { 'src/slugify.mjs': SLUG }, change: { 'src/parse.mjs': 'export function parseCsvLine(line) {\n  return line.split(",").map((c) => c.trim())\n}\n' } },
   { id: 'TN-correct-reuse', expect: false, base: { 'src/slugify.mjs': SLUG }, change: { 'src/url.mjs': "import { slugify } from './slugify.mjs'\nexport const toUrlPath = (s) => slugify(s)\n" } },
+  // PROSE duplication-of-intent — the critic now also covers docs (run this before trusting it past warn-only).
+  { id: 'TP-doc-dup (restates an existing doc)', expect: true, base: { 'docs/setup.md': SETUP_DOC }, change: { 'docs/getting-started.md': '# Getting Started\n\nTo set up: run `npm install`, copy `.env.example` to `.env`, then start with `npm start`. It listens on port 3000.\n' } },
+  { id: 'TN-doc-new-topic', expect: false, base: { 'docs/setup.md': SETUP_DOC }, change: { 'docs/architecture.md': '# Architecture\n\nThree layers: an HTTP router, a service layer, and a Postgres data layer. Requests flow router → service → data.\n' } },
 ]
 
 function critiqueOnce({ base, change }) {

@@ -126,10 +126,13 @@ export function runCritic(cfg, baseSha) {
   if (!diff.trim()) return { flagged: false, confidence: 'low', summary: 'empty diff' }
   const prompt =
     'You are a skeptical senior reviewer with READ access to this repository (use your search/read tools).\n' +
-    'Your ONE job: detect DUPLICATION-OF-INTENT — code in the change below that reimplements functionality ' +
-    'that ALREADY EXISTS elsewhere in this repo and should have reused or extended it instead.\n\n' +
-    'Method: for each new function / module / helper in the change, SEARCH the existing codebase for code that ' +
-    'already does the same job. Flag only genuine same-responsibility duplication; ignore style and naming.\n\n' +
+    'Your ONE job: detect DUPLICATION-OF-INTENT — code OR documentation in the change below that reimplements ' +
+    'or restates something that ALREADY EXISTS elsewhere in this repo and should have reused, extended, or ' +
+    'UPDATED it in place instead of adding a parallel copy.\n\n' +
+    'Method: for each new function / module / helper, SEARCH the existing codebase for code that already does ' +
+    'that job. For each new or grown doc / markdown file, SEARCH for an existing doc covering the same ground ' +
+    'that should have been updated in place. Flag only genuine same-responsibility duplication; ignore style ' +
+    'and naming, and NEVER suggest writing more prose.\n\n' +
     'Respond with ONLY a JSON object as the LAST line: ' +
     '{"flagged": boolean, "confidence": "low"|"medium"|"high", "summary": "what duplicates what, citing files"}.\n\n' +
     `CHANGE (diff + new files):\n${diff}\n`
