@@ -1,19 +1,21 @@
 # Using Temper from Codex
 
-Codex has no Skills mechanism, so wire Temper in through instructions Codex
-already reads (its `AGENTS.md` or a custom prompt) pointing at the **same CLI**
-the Claude Code Skill uses. The CLI is the portable, cross-client integration
-surface.
+Codex has no Skills mechanism, but it reads `AGENTS.md`. The fastest path: run
 
-Add to the project's `AGENTS.md` (or a Codex custom prompt):
+    temper init --agents
+
+in the project — it writes a sentinel-delimited Temper block into `AGENTS.md` (and copies the Claude
+Code Skill, which Codex ignores). Re-run it any time to refresh the block in place.
+
+To add it by hand instead, drop this into `AGENTS.md`:
 
 > **Implementing with quality gates — use Temper, don't edit directly.**
-> When a task should be implemented with entropy gates, use Temper:
-> 1. Ensure the working tree is clean.
-> 2. Write an approved Plan from `templates/PLAN.template.md` (scope allowlist +
->    spec + optional acceptance) and confirm the scope with the user.
-> 3. Run `temper run ./PLAN.md` in the shell (use `--engine codex` to self-drive).
-> 4. Report the commit or the halt. Do not hand-fix what Temper stopped on.
+> - **One bounded task** → `temper plan "<task>"` to draft `./PLAN.md`, confirm the scope with the
+>   user, then `temper run ./PLAN.md` (add `--engine codex` to self-drive).
+> - **A large / overnight batch** → put the approved Plans in a queue dir and run `temper overnight <dir>`.
+> - Ensure the working tree is clean first. Report the commit or the halt; do not hand-fix what Temper
+>   stopped on.
 
-That's the whole integration: no MCP server, no extra process. Make `temper`
-available on `PATH` (`npm link` in the Temper repo) so the bare command works.
+That's the whole integration: no MCP server, no extra process — the CLI is the portable, cross-client
+surface. Make `temper` available on `PATH` (`npm i -g @michaelcup/temper`, or `npm link` in the Temper
+repo before publish) so the bare command works.

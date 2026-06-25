@@ -51,7 +51,7 @@ git clone https://github.com/michaelcup/Temper && cd Temper && npm link
 temper doctor                         # check prerequisites
 temper init                           # scaffold config — do this FIRST (entry-point-aware fallow config)
 temper plan "add a foo widget"        # draft a Plan from the codebase
-$EDITOR ./PLAN.md                     # review + approve it (or hand-write from templates/PLAN.template.md)
+$EDITOR ./PLAN.md                     # review + approve it (scope allowlist + spec + acceptance)
 temper run ./PLAN.md                  # add --engine codex to switch engines
 ```
 
