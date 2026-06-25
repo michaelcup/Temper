@@ -146,6 +146,37 @@ test('temper init writes the full key set (not just a 4-key stub)', () => {
   }
 })
 
+test('temper init --agents wires the Skill + a sentinel-delimited AGENTS.md block, idempotently', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'temper-agents-'))
+  execFileSync('git', ['init', '-q'], { cwd: dir })
+  try {
+    const r = temper(dir, ['init', '--agents'])
+    assert.equal(r.code, 0, r.out)
+    assert.ok(existsSync(join(dir, '.claude', 'skills', 'temper', 'SKILL.md')), 'copies the Claude Code Skill into the project')
+    const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    assert.match(agents, /temper:integrate-start/, 'writes the sentinel-delimited block')
+    assert.match(agents, /temper overnight/, 'the block routes batch work to overnight')
+    // Idempotent: a second run must refresh in place, not append a duplicate block.
+    temper(dir, ['init', '--agents'])
+    const agents2 = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    assert.equal((agents2.match(/temper:integrate-start/g) || []).length, 1, 'block not duplicated on re-run')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('temper init --no-agents leaves the agent surface untouched', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'temper-noagents-'))
+  execFileSync('git', ['init', '-q'], { cwd: dir })
+  try {
+    temper(dir, ['init', '--no-agents'])
+    assert.ok(!existsSync(join(dir, '.claude')), 'no skill written')
+    assert.ok(!existsSync(join(dir, 'AGENTS.md')), 'no AGENTS.md written')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('temper run does NOT false-fail a subshell acceptance command (it runs to a green gate)', () => {
   const dir = mkdtempSync(join(tmpdir(), 'temper-subshell-'))
   const g = (a) => execFileSync('git', a, { cwd: dir })

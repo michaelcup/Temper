@@ -10,7 +10,7 @@
 // and the command dispatch. The machinery lives in src/ (sh, config, gates,
 // engine, plan, loop, phases, eval).
 
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { run, log, fail, requireCleanRepo, commandBinary, resolvesOnPath } from '../src/sh.mjs'
 import { loadConfig, resolveEngines, applyMaxIterations, applyQueueBudget, hasFallowConfig, projectHasTests, DEFAULTS } from '../src/config.mjs'
@@ -95,10 +95,54 @@ function preflightOnboarding() {
 // work, and the README shows how to add a preset.
 const STARTER_KEYS = ['engine', 'criticEngine', 'fallowCommand', 'maxIterations', 'maxDomainRetries', 'maxUnchangedRetries', 'criticMode', 'checkCompleteness', 'commitPrefix', 'maxQueueSeconds', 'maxQueueIterations', 'notifyCommand']
 
-// `temper init` — scaffold a project so the dead-code gate doesn't false-positive on new exports/tests.
-// fallow already treats package.json exports/main/bin as entry points (the library API); this declares
-// TEST files as entry points too, so adding a new exported function with a test commits, not escalates.
-function runInit() {
+// The AGENTS.md block Temper writes so a Codex-style agent (anything that reads AGENTS.md) knows when to
+// reach for the CLI. Sentinel-delimited so `temper init` can refresh it in place without clobbering the
+// rest of the file. The SAME routing the Skill uses: one task → run, a batch → overnight.
+const AGENTS_START = '<!-- temper:integrate-start -->'
+const AGENTS_END = '<!-- temper:integrate-end -->'
+const AGENTS_BLOCK = `${AGENTS_START}
+## Temper — gated implementation
+
+When a change should be implemented with quality gates (not just done), drive it through Temper instead
+of editing files directly:
+
+- **One bounded task** → \`temper plan "<task>"\` to draft \`./PLAN.md\`, confirm the scope with the user,
+  then \`temper run ./PLAN.md\`.
+- **A large batch / overnight pass** → put the approved Plans in a queue dir and run \`temper overnight <dir>\`.
+- **A single trivial edit** (typo, one-liner) → just do it directly; Temper is for changes worth gating.
+
+Temper needs a clean tree, makes one commit per green gate, and stops (without hand-fixing) when a gate or
+the reuse-critic flags something only a human should decide. Report the commit or the halt — do not
+hand-fix what Temper stopped on.
+${AGENTS_END}`
+
+// Wire the agent integration: copy the Claude Code Skill into .claude/skills/temper/ and write/refresh the
+// AGENTS.md block. Idempotent — re-running overwrites the skill copy and replaces the AGENTS.md block in
+// place (string-sliced between sentinels, no regex). Returns the labels actually written.
+function wireAgents(cwd) {
+  const wrote = []
+  const skillDir = join(cwd, '.claude', 'skills', 'temper')
+  mkdirSync(skillDir, { recursive: true })
+  writeFileSync(join(skillDir, 'SKILL.md'), readFileSync(new URL('../skills/temper/SKILL.md', import.meta.url), 'utf8'))
+  wrote.push('.claude/skills/temper/SKILL.md')
+  const agentsPath = join(cwd, 'AGENTS.md')
+  const existing = existsSync(agentsPath) ? readFileSync(agentsPath, 'utf8') : ''
+  const s = existing.indexOf(AGENTS_START)
+  const e = existing.indexOf(AGENTS_END)
+  let next
+  if (s !== -1 && e !== -1) next = existing.slice(0, s) + AGENTS_BLOCK + existing.slice(e + AGENTS_END.length)
+  else next = (existing ? existing.replace(/\n*$/, '\n\n') : '') + AGENTS_BLOCK + '\n'
+  writeFileSync(agentsPath, next)
+  wrote.push(s !== -1 ? 'AGENTS.md (refreshed Temper block)' : existing ? 'AGENTS.md (added Temper block)' : 'AGENTS.md')
+  return wrote
+}
+
+// `temper init` — scaffold a project so the dead-code gate doesn't false-positive on new exports/tests,
+// and (with --agents, or when this repo already uses an agent) wire the Skill + AGENTS.md so the agent
+// reaches for Temper. fallow already treats package.json exports/main/bin as entry points (the library
+// API); this declares TEST files as entry points too, so adding a new exported function with a test
+// commits, not escalates.
+function runInit(flags = {}) {
   const cwd = process.cwd()
   const wrote = []
   const configs = []
@@ -115,11 +159,18 @@ function runInit() {
   // Gitignore Temper's working artifacts so they never dirty the tree (a friction hit repeatedly when
   // dogfooding): the runtime dir (.temper/ — ledger/report) and the drafted PLAN.md (regenerated each run).
   wrote.push(...ensureGitignored(join(cwd, '.gitignore'), ['.temper/', 'PLAN.md']))
+  // Agent wiring: --agents forces it, --no-agents skips it; a bare `temper init` auto-wires when this repo
+  // already uses an agent (.claude/ or AGENTS.md present), so it "just sets me up" without surprising a
+  // project that doesn't.
+  const wantAgents = 'agents' in flags ? true : 'no-agents' in flags ? false : existsSync(join(cwd, '.claude')) || existsSync(join(cwd, 'AGENTS.md'))
+  if (wantAgents) wrote.push(...wireAgents(cwd))
   log(wrote.length ? `✓ wrote ${wrote.join(', ')}` : '✓ already configured (temper.config.json + a fallow config both present)')
   log('\nNext:')
   log('  • Make sure your public API is in package.json "exports"/"main"/"bin" (fallow treats those')
   log('    as entry points), or add globs to .fallowrc.json "entry".')
   log('  • Set "criticEngine" to the OTHER engine in temper.config.json for cross-model review.')
+  if (wantAgents) log('  • Your agent now knows Temper — Claude Code via the Skill, Codex via AGENTS.md. Commit AGENTS.md.')
+  else log('  • Run `temper init --agents` to wire the Claude Code / Codex skill so your agent reaches for Temper.')
   logCommitHint(configs)
 }
 
@@ -237,7 +288,7 @@ function main() {
   } else if (cmd === 'status') {
     status(cfg)
   } else if (cmd === 'init') {
-    runInit()
+    runInit(flags)
   } else if (cmd === 'explain') {
     explain(arg)
   } else if (cmd === 'eval') {
@@ -256,7 +307,7 @@ function main() {
         '  temper run <plan.md>          run one approved Plan to a green gate\n' +
         '  temper overnight <dir>        work an ordered queue of Plans unattended — own branch + morning report\n\n' +
         '  temper plan "<task>"          draft a Plan from the codebase for you to approve\n' +
-        '  temper init                   scaffold temper.config.json + an entry-aware fallow config\n' +
+        '  temper init [--agents]        scaffold config; --agents wires the Claude Code / Codex skill\n' +
         '  temper status                 summarize the current/last queue from the ledger\n' +
         '  temper explain <gate>         what a gate/verdict means + how to clear it\n' +
         '  temper doctor                 check prerequisites\n' +
