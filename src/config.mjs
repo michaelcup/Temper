@@ -134,3 +134,15 @@ export const hasFallowConfig = () => FALLOW_CONFIGS.some((f) => existsSync(join(
 // Heuristic: does the repo contain test files (which fallow's dead-code gate would flag as "unused")?
 export const projectHasTests = () =>
   /(?:^|\/)[^/\n]*[._](?:test|spec|cy|e2e)\.|(?:^|\/)(?:tests?|__tests__|spec|e2e|cypress|playwright)\//m.test(run('git ls-files').out)
+
+// Does package.json declare a fallow entry point — the library API (exports/main/bin)? fallow measures
+// dead code FROM entry points, so a repo with none (no package entry AND no tests) gives fallow no root:
+// pre-existing unused code is invisible until the first change adds an entry, then shows up as "introduced".
+export const hasPackageEntry = () => {
+  try {
+    const pkg = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8'))
+    return Boolean(pkg.exports || pkg.main || pkg.bin)
+  } catch {
+    return false
+  }
+}

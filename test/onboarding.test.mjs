@@ -177,6 +177,23 @@ test('temper init --no-agents leaves the agent surface untouched', () => {
   }
 })
 
+test('temper doctor warns about the no-entry-point bootstrap risk, and goes quiet once an entry exists', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'temper-bootstrap-'))
+  execFileSync('git', ['init', '-q'], { cwd: dir })
+  // fallowCommand 'true' resolves on PATH (so the entropy gate is "available"); no tests, no package entry.
+  writeFileSync(join(dir, 'temper.config.json'), JSON.stringify({ fallowCommand: 'true', engines: { stub: { engine: 'true', critic: 'true' } }, engine: 'stub' }))
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'x', type: 'module' })) // no exports/main/bin
+  try {
+    const r1 = temper(dir, ['doctor'])
+    assert.match(r1.out, /No fallow entry points yet/, 'warns when fallow has no root to measure reachability')
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'x', type: 'module', main: 'index.mjs' })) // add an entry
+    const r2 = temper(dir, ['doctor'])
+    assert.doesNotMatch(r2.out, /No fallow entry points yet/, 'silent once an entry point exists')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('temper run does NOT false-fail a subshell acceptance command (it runs to a green gate)', () => {
   const dir = mkdtempSync(join(tmpdir(), 'temper-subshell-'))
   const g = (a) => execFileSync('git', a, { cwd: dir })

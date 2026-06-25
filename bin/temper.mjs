@@ -13,7 +13,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { run, log, fail, requireCleanRepo, commandBinary, resolvesOnPath } from '../src/sh.mjs'
-import { loadConfig, resolveEngines, applyMaxIterations, applyQueueBudget, hasFallowConfig, projectHasTests, DEFAULTS } from '../src/config.mjs'
+import { loadConfig, resolveEngines, applyMaxIterations, applyQueueBudget, hasFallowConfig, projectHasTests, hasPackageEntry, DEFAULTS } from '../src/config.mjs'
 import { parsePlan, runPlanDraft } from '../src/plan.mjs'
 import { runLoop } from '../src/loop.mjs'
 import { runPhases, status } from '../src/phases.mjs'
@@ -206,6 +206,14 @@ function doctor(cfg) {
     log('\n⚠ No fallow config, but this project has tests. fallow\'s dead-code gate flags new')
     log('  exports / test files as "unused" without entry-point config — a new exported function')
     log('  would escalate instead of committing. Run `temper init` to scaffold one.')
+  }
+  // Bootstrap risk: no entry points at all (no tests, no package exports/main/bin) → fallow has no root to
+  // measure reachability, so the FIRST change that adds an entry can flag pre-existing unused code as
+  // newly-dead ("introduced"). With entry points present, fallow attributes inherited dead code correctly.
+  if (!cfg.entropyGate && resolvesOnPath(entropyBin) && !projectHasTests() && !hasPackageEntry()) {
+    log('\nℹ No fallow entry points yet (no tests, no package.json exports/main/bin). fallow measures dead')
+    log('  code from entry points, so the first change that adds one can flag pre-existing unused code as')
+    log('  "introduced". Add an entry point (a test, or package.json exports/main/bin) before your first run.')
   }
   // Running inside a nested / host-managed agent session is the other classic first-run failure: the
   // child `claude -p` Temper spawns may not reach your terminal's subscription auth (it can 401).
