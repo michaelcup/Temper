@@ -1,7 +1,8 @@
 # Temper
 
 **Let your coding agent loop, and commit only what survives the gate.** The work that reaches your
-git history passed a deterministic check: in scope, no dead code, no duplication, your tests green.
+git history passed a deterministic check: in scope, no dead code, no duplication, your tests green, and a
+hidden check the agent never sees so it cannot quietly game the gate.
 Queue a night of it and you wake up to review-ready commits, not a tree you have to unpick.
 
 Temper is a thin, engine-agnostic, zero-dependency loop runner for AI coding. You approve one
@@ -29,19 +30,45 @@ Plan (you approve)
 
 Everything deterministic is code. The **engine** and the **reuse-critic** are
 the only LLM steps. The critic's reliability is measured, not assumed (`npm run critic-check`).
-The optional held-out check is hidden from the engine's *prompt* — but it lives in the plan file, so a
+The optional held-out check is hidden from the engine's *prompt*, but it lives in the plan file, so a
 repo-exploring engine can read it. It catches an honest-but-insufficient gate, not a determined cheater.
+
+## How it's different
+
+Most runners gate on a passing test suite, and they let the agent run the tests. But agents game gates:
+across published evals ([METR](https://metr.org/blog/2025-06-05-recent-reward-hacking/),
+[ImpossibleBench](https://arxiv.org/abs/2510.20270), [Patronus TRACE](https://arxiv.org/abs/2601.20103)), the
+same CLIs Temper drives edit tests, weaken assertions, hardcode outputs, and special-case inputs to turn a
+gate green, and they do it more as the models get more capable. A green suite the agent controlled is not
+evidence.
+
+So Temper gates differently:
+
+- **A deterministic cascade, not just tests.** Scope-lock, no new dead code, no duplication, completeness vs
+  the Plan: rules Temper runs, not judgment the agent can argue past. Others stop at tests and lint (aider,
+  Ralph), hand you primitives to script yourself (Claude Code hooks), or ask another model to eyeball the
+  diff (Devin, Cursor).
+- **A held-out check the agent never sees.** Temper runs one command that never enters the engine's prompt.
+  If the work passes every visible gate but fails that one, Temper rejects it as gamed and commits nothing.
+  No other shipping AI-coding tool has this. It is one layer, not a cure-all: it catches an insufficient
+  gate, not every determined cheat, but it is the layer everyone else is missing.
+- **Commit discipline.** Only gated work commits, each run on its own branch, and Temper never merges; you
+  do. (aider, by contrast, auto-commits every edit, ungated, to your working branch.)
+
+Temper shares the shape of Geoffrey Huntley's Ralph loop: engine-agnostic, branch-isolated, never-merge,
+unattended. The difference is the gates. Where Ralph runs tests the agent can edit, Temper adds a
+deterministic cascade and a check the agent cannot see.
 
 ## Run it
 
 > ⚠️ Temper runs in **your own terminal**, where `claude` / `codex` hold real subscription
 > credentials. It **cannot** run inside Claude Code's web, desktop "Remote", or Cowork sandboxes
-> (they withhold your subscription auth, so the nested `claude -p` 401s) — run it from a plain
+> (they withhold your subscription auth, so the nested `claude -p` 401s). Run it from a plain
 > terminal. The deterministic core is covered by `temper eval`; the engine integration is verified
 > end-to-end with both Claude and Codex.
 
 **Prerequisites:** Node 18+, `git`, and an engine (`claude` or `codex`) installed and logged in.
-`fallow` is **optional** (`npm i -g fallow`) — it adds the deterministic dead-code/duplication/complexity
+`fallow` is **optional** (`npm i -g fallow`). It adds the deterministic dead-code/duplication/complexity
 gate; without it, Temper runs the loop on the other gates and skips that one. `temper doctor` checks
 everything.
 
@@ -51,7 +78,7 @@ git clone https://github.com/michaelcup/Temper && cd Temper && npm link
 
 # then, from inside the repo you want to work on:
 temper doctor                         # check prerequisites
-temper init                           # scaffold config — do this FIRST (entry-point-aware fallow config)
+temper init                           # scaffold config, do this FIRST (entry-point-aware fallow config)
 temper plan "add a foo widget"        # draft a Plan from the codebase
 $EDITOR ./PLAN.md                     # review + approve it (scope allowlist + spec + acceptance)
 temper run ./PLAN.md                  # add --engine codex to switch engines
@@ -96,7 +123,7 @@ Temper is engine-agnostic. Engines are named presets in config (`claude` and
 ```jsonc
 {
   "engine": "claude",        // which preset implements
-  "criticEngine": "codex",   // which preset reviews — set to the OTHER engine
+  "criticEngine": "codex",   // which preset reviews, set to the OTHER engine
                              // for cross-model review (stronger than self-review)
   "fallowCommand": "npx fallow",
   "entropyGate": null,       // null = `<fallowCommand> audit --gate new-only` (JS/TS). Override with ANY
@@ -144,9 +171,9 @@ Temper is **mostly language-agnostic**. Scope-lock, protected regions, the suppr
 acceptance tests, the reuse-critic, and held-out checks all work on any language. Only the **entropy
 gate** (dead code / duplication / complexity) is JS/TS-specific, because it's `fallow`.
 
-- **JS/TS:** the default — `fallow` gives the entropy gate, scoped to what the change *introduced*.
+- **JS/TS:** the default. `fallow` gives the entropy gate, scoped to what the change *introduced*.
 - **Any other language:** Temper runs today on the gates above (fallow is optional). To add a
-  deterministic entropy gate too, set `entropyGate` to a tool of your choice — any command, where a
+  deterministic entropy gate too, set `entropyGate` to a tool of your choice: any command where a
   non-zero exit means "new entropy." `{base}` is substituted with the base commit SHA. Caveat:
   fallow's `--gate new-only` fails only on what the change *introduced*; a tool without that scoping
   will also flag pre-existing issues, so scope it to the diff (e.g. against `{base}`).
@@ -156,8 +183,8 @@ gate** (dead code / duplication / complexity) is JS/TS-specific, because it's `f
 **Prose counts too.** The same anti-entropy discipline applies to docs: the engine prompt tells the
 agent to update an existing doc rather than spawn a new one and to keep writing terse, and the
 **reuse-critic** now also flags a new doc that restates one that already exists. For a deterministic
-guard, point `entropyGate` at the bundled recipe — `"entropyGate": "node examples/doc-gate.mjs {base}"`
-— which fails when a change adds a new markdown file, nudging "update, don't create."
+guard, point `entropyGate` at the bundled recipe `"entropyGate": "node examples/doc-gate.mjs {base}"`,
+which fails when a change adds a new markdown file, nudging "update, don't create."
 
 ## Overnight mode (the unattended Plan-queue)
 
@@ -185,7 +212,7 @@ layers these on the resumable phase sequencer:
 - **A direction check (opt-in).** The per-iteration gates check *did we do it right*; this checks
   *are we doing the right thing*. Before a phase, Temper can ground its APPROACH against a trust-list
   you supply and flag work built on a deprecated/superseded/contradicted premise before it compounds
-  across the night. Off by default — see below.
+  across the night. Off by default; see below.
 
 **Setting up the queue.** Phase files are ordered Plans (`01-*.md`, `02-*.md`, …), each the same
 format as a `temper run` Plan. Draft them with `temper plan` and `--out`:
@@ -226,13 +253,13 @@ until you give it sources:
 ```
 
 The check is one bounded question to the critic engine, grounded **only** in your sources (local files
-are read directly; URLs are fetched only if the engine has web tools) — never the open web, so an
+are read directly; URLs are fetched only if the engine has web tools), never the open web, so an
 untrusted page can't steer it. It's fail-open (an unparseable verdict never blocks) and overnight-only.
 
 ## First-run checklist (the things most likely to bite)
 
 0. **Run `temper init` first.** Without an entry-point-aware fallow config, the dead-code
-   gate flags new **library exports** and **test files** as "unused — not reachable from an
+   gate flags new **library exports** and **test files** as "unused, not reachable from an
    entry point," so *adding a new exported function escalates instead of committing*. `temper
    init` scaffolds a `.fallowrc.json` that treats tests as entry points (and fallow already
    treats `package.json` `exports`/`main`/`bin` as the library API). If you skip it, `temper run`

@@ -106,16 +106,17 @@ export function enginePrompt(plan, violations) {
   p += 'Rules: extend existing code rather than duplicating it; delete what you replace '
   p += '(no dead or commented-out code); never modify code inside a `temper:protect-start … '
   p += 'temper:protect-end` region; do the task and nothing more.\n'
-  p += 'Writing: do NOT create new docs or markdown files unless a scope path names one — update the '
-  p += 'nearest existing file instead. Be terse — cut any line whose removal would not cause a mistake; '
+  p += 'Writing: do NOT create new docs or markdown files unless a scope path names one; update the '
+  p += 'nearest existing file instead. Be terse: cut any line whose removal would not cause a mistake; '
   p += 'no preamble, no restating the task. Match the register of what you edit: user-facing copy is '
-  p += 'confident, specific, and minimal — concrete details over generic filler, no developer commentary, '
+  p += 'confident, specific, and minimal, with concrete details over generic filler, no developer commentary, '
   p += 'no "note that…", no decorative emoji or emoji-as-icons, no empty superlatives ("seamlessly", '
-  p += '"elevate", "unlock"). Comments explain only what the code cannot.\n\n'
+  p += '"elevate", "unlock"). Write plain declarative sentences: no em-dash asides, no rhetorical questions, '
+  p += 'no fragments standing in for sentences. Comments explain only what the code cannot.\n\n'
   p += `# Task\n${plan.body}\n`
   if (violations.length) {
     p += '\n# Your previous attempt was REJECTED. Fix the ROOT CAUSE of each item below.\n'
-    p += 'Do NOT suppress findings, skip or weaken tests, or silence checks — fix the underlying issue.\n'
+    p += 'Do NOT suppress findings, skip or weaken tests, or silence checks. Fix the underlying issue.\n'
     p += 'Show the command(s) you ran and their output as evidence the fix works.\n\n'
     p += violations.map((v) => `- ${v}`).join('\n') + '\n'
   }
@@ -127,14 +128,14 @@ export function runCritic(cfg, baseSha) {
   if (!diff.trim()) return { flagged: false, confidence: 'low', summary: 'empty diff' }
   const prompt =
     'You are a skeptical senior reviewer with READ access to this repository (use your search/read tools).\n' +
-    'Your ONE job: detect DUPLICATION-OF-INTENT — code OR documentation in the change below that reimplements ' +
+    'Your ONE job: detect DUPLICATION-OF-INTENT, meaning code OR documentation in the change below that reimplements ' +
     'or restates something that ALREADY EXISTS elsewhere in this repo and should have reused, extended, or ' +
     'UPDATED it in place instead of adding a parallel copy.\n\n' +
     'Method: for each new function / module / helper, SEARCH the existing codebase for code that already does ' +
     'that job. For each new or grown doc / markdown file, SEARCH for an existing doc covering the same ground ' +
     'that should have been updated in place. Flag only genuine same-responsibility duplication; ignore style ' +
     'and naming, and NEVER suggest writing more prose. Code that imports, calls, delegates to, or re-exports ' +
-    'an existing implementation is CORRECT REUSE, not duplication — never flag it; that is the outcome you want.\n\n' +
+    'an existing implementation is CORRECT REUSE, not duplication. Never flag it; that is the outcome you want.\n\n' +
     'Respond with ONLY a JSON object as the LAST line: ' +
     '{"flagged": boolean, "confidence": "low"|"medium"|"high", "summary": "what duplicates what, citing files"}.\n\n' +
     `CHANGE (diff + new files):\n${diff}\n`
@@ -152,7 +153,7 @@ export function runCompletenessCheck(cfg, plan, baseSha) {
   const prompt =
     'You are verifying that a change FULLY implements its Plan. Below are the PLAN and the DIFF.\n' +
     'Does the diff implement EVERY step the Plan requires? Flag ONLY genuinely missing or only-partially-done ' +
-    'work the Plan explicitly asked for — not style, not extra polish.\n\n' +
+    'work the Plan explicitly asked for, not style, not extra polish.\n\n' +
     'Reply with ONLY a JSON object as the LAST line: {"complete": boolean, "missing": "one sentence on what is missing, or none"}.\n\n' +
     `PLAN:\n${plan.body}\n\nDIFF:\n${diff}\n`
   const { out } = callCli(cfg.criticCommand, prompt, cfg)
@@ -168,14 +169,14 @@ export function runCompletenessCheck(cfg, plan, baseSha) {
 // style or scope. Fail-OPEN: no usable verdict ⇒ sound (must never block an unattended queue on an LLM glitch).
 export function runDirectionCheck(cfg, plan) {
   const prompt =
-    'You are checking whether a planned change takes the RIGHT APPROACH — not whether it is well-written, but ' +
+    'You are checking whether a planned change takes the RIGHT APPROACH, not whether it is well-written, but' +
     'whether its PREMISE is sound and current. Below is the PLAN for an upcoming task.\n\n' +
     'Ground your judgment ONLY in these trusted sources (read local file paths directly; fetch URLs only if you ' +
     'have web tools). Do NOT free-browse the open web. If the sources are silent on this plan, return sound:true:\n' +
     cfg.directionCheck.sources.map((s) => `  - ${s}`).join('\n') + '\n\n' +
     'Flag a direction-miss ONLY if a trusted source shows the plan relies on something deprecated, superseded, ' +
     'removed, or contradicted (a gone API, an outdated pattern, a false assumption). NEVER flag style, scope, ' +
-    'naming, or "could be better" — only a concrete, sourced wrong-direction.\n\n' +
+    'naming, or "could be better"; flag only a concrete, sourced wrong-direction.\n\n' +
     'Reply with ONLY a JSON object as the LAST line, no prose: ' +
     '{"sound": boolean, "concern": "one sentence, or none", "source": "which trusted source shows it, or none"}.\n\n' +
     `PLAN:\n${plan.body}\n`
@@ -193,9 +194,9 @@ export function runDirectionCheck(cfg, plan) {
 export function runReconcile(cfg, a, b) {
   const one = (p) => `  title: ${p.title}\n  scope: ${p.scope.join(', ')}\n  goal: ${p.body.replace(/\s+/g, ' ').slice(0, 400)}`
   const prompt =
-    'Two planned tasks have OVERLAPPING file scopes — they may edit the same file in sequence. Judge whether ' +
+    'Two planned tasks have OVERLAPPING file scopes; they may edit the same file in sequence. Judge whether ' +
     'they genuinely CONTEND for the same behavior or just coincidentally share a file, and if they contend, how ' +
-    'to resolve it. You see ONLY the two plans below (titles, scopes, goals) — not the code.\n\n' +
+    'to resolve it. You see ONLY the two plans below (titles, scopes, goals), not the code.\n\n' +
     `PLAN A:\n${one(a)}\n\nPLAN B:\n${one(b)}\n\n` +
     'Reply with ONLY a JSON object as the LAST line, no prose: ' +
     '{"resolution": "independent"|"drop"|"merge"|"consult", "which": "A"|"B"|"both", "why": "one sentence"}.\n' +
