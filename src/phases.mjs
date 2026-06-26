@@ -258,7 +258,11 @@ export function runPhases(cfg, dir, opts = {}) {
   }
   logEstimate(cfg, phases.length)
   const ledgerPath = cfg.progressFile
-  const ledger = loadLedger(ledgerPath)
+  // The ledger is one shared file. If it records a DIFFERENT queue than this one (no overlapping phase files),
+  // start fresh so `temper status` reflects THIS run, not a stale other queue's. Same queue ⇒ keep it (resume).
+  let ledger = loadLedger(ledgerPath)
+  const phaseFileSet = new Set(phases.map((p) => p.file))
+  if (ledger.length && !ledger.some((e) => phaseFileSet.has(e.file))) ledger = []
   const base = git('rev-parse --abbrev-ref HEAD')
   const branch = setupBranchIsolation(opts, dir, base)
 

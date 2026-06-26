@@ -174,6 +174,34 @@ test('the morning report flags a declared overlap as NOT confirmed when a phase 
   }
 })
 
+test('the ledger resets for a different queue, so temper status reflects the last run not a stale queue', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'temper-q9-'))
+  const g = (a) => execFileSync('git', a, { cwd: dir })
+  mkdirSync(join(dir, 'src'))
+  mkdirSync(join(dir, '.temper', 'qa'), { recursive: true })
+  mkdirSync(join(dir, '.temper', 'qb'), { recursive: true })
+  writeFileSync(join(dir, 'src', 'v.mjs'), 'export const V = 0\n')
+  writeFileSync(join(dir, '.gitignore'), '.temper/\n')
+  writeFileSync(join(dir, 'temper.config.json'), JSON.stringify({ engines: { stub: { engine: APPEND_ENGINE, critic: 'true' } }, engine: 'stub', fallowCommand: 'true', criticMode: 'off' }))
+  const fm = `---\nscope:\n  - "src/v.mjs"\nacceptance: "node --check src/v.mjs"\n---\n`
+  writeFileSync(join(dir, '.temper', 'qa', '01-alpha.md'), fm + '# alpha\nx\n')
+  writeFileSync(join(dir, '.temper', 'qb', '01-beta.md'), fm + '# beta\nx\n')
+  g(['init', '-q'])
+  g(['config', 'user.email', 'a@b.c'])
+  g(['config', 'user.name', 'a'])
+  g(['add', '-A'])
+  g(['commit', '-qm', 'seed'])
+  try {
+    assert.equal(temper(dir, ['overnight', '.temper/qa']).code, 0)
+    assert.equal(temper(dir, ['overnight', '.temper/qb']).code, 0)
+    const s = temper(dir, ['status'])
+    assert.match(s.out, /beta/, 'status shows the most recent queue')
+    assert.doesNotMatch(s.out, /alpha/, 'status does not conflate the earlier, different queue')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('`temper overnight <dir>` is the alias — isolates on temper/<dir> + writes a report, no --overnight flag needed', () => {
   const dir = setup(baseCfg(), [['one', 'x']])
   try {
