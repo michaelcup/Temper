@@ -153,6 +153,9 @@ function runInit(flags = {}) {
   }
   if (!existsSync(join(cwd, 'temper.config.json'))) {
     const starter = Object.fromEntries(STARTER_KEYS.map((k) => [k, DEFAULTS[k]]))
+    // Prefer a project-local fallow over the bare `fallow` default: JS/TS projects commonly pin it as a dev
+    // dep rather than installing globally, and the pinned version is more reproducible. Falls back to PATH.
+    if (existsSync(join(cwd, 'node_modules', '.bin', 'fallow'))) starter.fallowCommand = 'node_modules/.bin/fallow'
     writeFileSync(join(cwd, 'temper.config.json'), JSON.stringify(starter, null, 2) + '\n')
     wrote.push('temper.config.json')
     configs.push('temper.config.json')
