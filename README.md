@@ -96,6 +96,7 @@ to inspect and commits nothing.
 | `temper plan "<task>" [--out <path>]` | the engine explores the codebase and **drafts a Plan** for you to approve (Research → Plan) |
 | `temper run <plan.md>` | run one approved Plan to a green gate (Mode A) |
 | `temper run-phases <dir> [--overnight] [--branch <b>]` | run ordered phase Plans (`01-*.md`, `02-*.md`), each gated against the prior commit; resumable via `.temper/progress.json`, stops on a failing phase. `--overnight` = **Mode B** (below) |
+| `temper audit [dir]` | scan the codebase with fallow and **draft scoped cleanup Plans** into `.temper/audit/` (dead code today: unused exports + files). Review and prune, then `temper overnight .temper/audit` removes them, gated. It proposes; it never deletes |
 | `temper status` | summarize the current/last queue from the ledger (works mid-run, including after a detached overnight run) |
 | `temper explain <gate>` | what a gate or verdict means and how to clear it (e.g. `temper explain fallow-audit`) |
 | `temper eval [--filter <id>] [--update-baseline]` | run the deterministic golden-task regression suite (exit 1 on any regression) |

@@ -33,9 +33,13 @@ export function runArgs(file, args, { env } = {}) {
       stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env, ...env },
     })
-    return { code: 0, out }
+    return { code: 0, out, stdout: out, stderr: '' }
   } catch (e) {
-    return { code: e.status ?? 1, out: `${e.stdout ?? ''}${e.stderr ?? ''}` }
+    // .out keeps the legacy stdout+stderr blob; .stdout / .stderr are separate so a caller that needs clean
+    // stdout (e.g. JSON parsing) is not corrupted when the command exits non-zero (fallow exits 1 on findings).
+    const stdout = e.stdout ?? ''
+    const stderr = e.stderr ?? ''
+    return { code: e.status ?? 1, out: `${stdout}${stderr}`, stdout, stderr }
   }
 }
 

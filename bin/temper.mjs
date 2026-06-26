@@ -18,6 +18,7 @@ import { parsePlan, runPlanDraft } from '../src/plan.mjs'
 import { runLoop } from '../src/loop.mjs'
 import { runPhases, status, planCheck, runTasks, addTask } from '../src/phases.mjs'
 import { runEval } from '../src/eval.mjs'
+import { runAudit } from '../src/audit.mjs'
 
 function parseArgs(argv) {
   const positionals = []
@@ -297,6 +298,8 @@ function main() {
     const queueDir = typeof flags.dir === 'string' ? flags.dir : cfg.phaseDir
     if (arg === 'add') addTask(cfg, positionals[2], queueDir, 'reconcile' in flags)
     else runTasks(cfg, arg, queueDir)
+  } else if (cmd === 'audit') {
+    runAudit(cfg, arg)
   } else if (cmd === 'overnight' || cmd === 'run-phases') {
     requireCleanRepo() // before the preflight: never scaffold a config into a dirty tree
     preflightOnboarding()
