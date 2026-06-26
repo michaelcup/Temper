@@ -95,11 +95,19 @@ function updateStreaks(domainStreaks, repeatStreaks, prevFiredFull, fired, fired
 // Commit ONLY the gated files (the `changed` set the gates validated) — NEVER `git add -A`, which
 // would sweep in any ungated file a held-out command (or anything else) dropped in the tree.
 function commitGatedChange(cfg, plan, changed) {
+  const before = git('rev-parse HEAD')
   const msgFile = join(tmpdir(), `temper-msg-${process.pid}.txt`)
   writeFileSync(msgFile, `${cfg.commitPrefix} ${plan.title}\n`)
-  runArgs('git', ['add', '--', ...changed]) // argv array, NO shell: an engine-named file can't inject
-  run(`git commit -F "${msgFile}"`)
-  return git('rev-parse HEAD')
+  const add = runArgs('git', ['add', '--', ...changed]) // argv array, NO shell: an engine-named file can't inject
+  const commit = run(`git commit -F "${msgFile}"`)
+  const after = git('rev-parse HEAD')
+  // A rejecting git hook (pre-commit/commit-msg) leaves HEAD UNMOVED while run() swallows the non-zero exit.
+  // NEVER report a phantom commit: it would record a false-green in the Mode B ledger, build the next phase
+  // on the wrong base, and the dirty tree is never re-caught (requireCleanRepo runs once, at queue start).
+  if (add.code !== 0 || commit.code !== 0 || after === before) {
+    return { ok: false, error: stripAnsi(commit.out || add.out || 'commit did not advance HEAD').trim() }
+  }
+  return { ok: true, sha: after }
 }
 
 // A fallow dynamic-load false-positive can't be fixed by re-prompting (the file IS used; fallow just
@@ -241,10 +249,15 @@ export function runPlan(cfg, plan, { baseSha }) {
       }
     }
 
-    const sha = commitGatedChange(cfg, plan, changed)
+    const c = commitGatedChange(cfg, plan, changed)
+    if (!c.ok) {
+      log(`\n■ commit FAILED — a git hook likely rejected it. Nothing committed (no false green).`)
+      log(c.error.split('\n').slice(0, 4).map((l) => '    ' + l).join('\n'))
+      return { status: 'error', sha: baseSha, iterations: i, seconds: elapsed(runStart), violations: [`commit failed: ${c.error.split('\n')[0]}`] }
+    }
     log(`\n✓ gate green — committed "${cfg.commitPrefix} ${plan.title}"`)
     log(`⏱ iteration ${i} took ${elapsed(iterStart)}  •  total ${elapsed(runStart)}`)
-    return { status: 'committed', sha, iterations: i, seconds: elapsed(runStart), violations: [], critic }
+    return { status: 'committed', sha: c.sha, iterations: i, seconds: elapsed(runStart), violations: [], critic }
   }
 
   log(`\n■ Reached ${cfg.maxIterations} iterations without a green gate (no single failure-domain stuck). Nothing committed; review the working tree.`)

@@ -3,7 +3,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync, readFileSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync, readFileSync, chmodSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -127,6 +127,34 @@ test('temper run fails fast when the acceptance command binary is not runnable',
     const r = temper(dir, ['run', 'PLAN.md'])
     assert.notEqual(r.code, 0, 'a non-runnable acceptance command stops before the loop')
     assert.match(r.out, /isn't runnable|not on your PATH/, 'flags the non-runnable acceptance command')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('a rejecting git hook does not produce a false-green commit', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'temper-hook-'))
+  const g = (a) => execFileSync('git', a, { cwd: dir })
+  mkdirSync(join(dir, 'src'))
+  writeFileSync(join(dir, 'src', 'v.mjs'), 'export const V = 0\n')
+  writeFileSync(join(dir, '.fallowrc.json'), '{ "entry": ["src/**"] }\n')
+  writeFileSync(join(dir, '.gitignore'), '.temper/\nPLAN.md\n')
+  writeFileSync(join(dir, 'temper.config.json'), JSON.stringify({ engines: { stub: { engine: APPEND, critic: 'true' } }, engine: 'stub', fallowCommand: 'true', criticMode: 'off' }))
+  writeFileSync(join(dir, 'PLAN.md'), '---\nscope:\n  - "src/**"\nacceptance: "node --check src/v.mjs"\n---\n# t\nx\n')
+  g(['init', '-q'])
+  g(['config', 'user.email', 'a@b.c'])
+  g(['config', 'user.name', 'a'])
+  g(['add', '-A'])
+  g(['commit', '-qm', 'seed'])
+  const before = execFileSync('git', ['rev-list', '--count', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim()
+  writeFileSync(join(dir, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\nexit 1\n') // hook rejects every commit
+  chmodSync(join(dir, '.git', 'hooks', 'pre-commit'), 0o755)
+  try {
+    const r = temper(dir, ['run', 'PLAN.md', '--engine', 'stub', '--max-iterations', '1'])
+    assert.notEqual(r.code, 0, 'a rejected commit must not exit committed')
+    assert.match(r.out, /commit FAILED/, 'reports the failed commit honestly')
+    const after = execFileSync('git', ['rev-list', '--count', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim()
+    assert.equal(after, before, 'HEAD must not have advanced (no phantom commit)')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
