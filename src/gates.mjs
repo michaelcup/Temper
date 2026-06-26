@@ -1,7 +1,7 @@
 // The deterministic gate primitives: scope allowlist, within-file protected regions, the
 // suppression guard, and the git-diff helpers the gates and critic read from.
 import { readFileSync } from 'node:fs'
-import { run } from './sh.mjs'
+import { run, runArgs } from './sh.mjs'
 
 // Gate-gaming guard: directives an agent adds to SILENCE a check instead of fixing it. Newly-added
 // occurrences are treated as violations ("suppression is not resolution"). Language-agnostic by
@@ -55,7 +55,7 @@ export const inScope = (file, scope) => scope.some((g) => globToRegExp(g).test(f
 // (committed) version so line numbers map to a stable reference. A change is rejected
 // if any diff hunk's old-side range overlaps a protected region.
 function protectedRegions(baseSha, file) {
-  const base = run(`git show ${baseSha}:"${file}"`)
+  const base = runArgs('git', ['show', `${baseSha}:${file}`]) // argv array, NO shell: filename can't inject
   if (base.code !== 0) return [] // file is new this run — nothing committed to protect
   const regions = []
   const open = []
@@ -90,7 +90,7 @@ export function protectionViolations(baseSha, plan, changed) {
       out.push(`Unbalanced temper:protect sentinels in ${file} (near line ${bad.line}). Fix the guard.`)
       continue
     }
-    const diff = run(`git diff --unified=0 ${baseSha} -- "${file}"`).out
+    const diff = runArgs('git', ['diff', '--unified=0', baseSha, '--', file]).out // argv, NO shell
     for (const m of diff.matchAll(/^@@ -(\d+)(?:,(\d+))? \+/gm)) {
       const oldStart = +m[1]
       const oldLen = m[2] === undefined ? 1 : +m[2]

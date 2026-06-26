@@ -1,5 +1,5 @@
 // Shell, git, logging, and small string primitives — the foundation other modules build on.
-import { execSync } from 'node:child_process'
+import { execSync, execFileSync } from 'node:child_process'
 
 // Cross-module MUTABLE state, held in one object because ESM can't reassign an imported binding:
 //   logQuiet    — the eval harness silences per-fixture loop chatter
@@ -10,6 +10,23 @@ export const state = { logQuiet: false, totalSleptMs: 0 }
 export function run(cmd, { env } = {}) {
   try {
     const out = execSync(cmd, {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, ...env },
+    })
+    return { code: 0, out }
+  } catch (e) {
+    return { code: e.status ?? 1, out: `${e.stdout ?? ''}${e.stderr ?? ''}` }
+  }
+}
+
+// Like run(), but executes a program with a LITERAL argv array and NO shell (shell:false). Use this for
+// any command that interpolates an untrusted path — under `/bin/sh -c`, a filename like `x$(curl…|sh).mjs`
+// would be command-substituted and EXECUTED. The engine controls the filenames it writes, so every git
+// command that takes a working-tree path must go through here, not a quoted shell string.
+export function runArgs(file, args, { env } = {}) {
+  try {
+    const out = execFileSync(file, args, {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env, ...env },

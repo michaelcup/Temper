@@ -3,7 +3,7 @@
 import { writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { run, log, git, requireCleanRepo, stripAnsi, normalizeFinding, notify, commandBinary, resolvesOnPath } from './sh.mjs'
+import { run, runArgs, log, git, requireCleanRepo, stripAnsi, normalizeFinding, notify, commandBinary, resolvesOnPath } from './sh.mjs'
 import { changedFiles, inScope, protectionViolations, addedSuppressions, fallowUnreachableNewFiles } from './gates.mjs'
 import { callCli, enginePrompt, runCritic, runCompletenessCheck } from './engine.mjs'
 import { validatePlan } from './plan.mjs'
@@ -97,7 +97,7 @@ function updateStreaks(domainStreaks, repeatStreaks, prevFiredFull, fired, fired
 function commitGatedChange(cfg, plan, changed) {
   const msgFile = join(tmpdir(), `temper-msg-${process.pid}.txt`)
   writeFileSync(msgFile, `${cfg.commitPrefix} ${plan.title}\n`)
-  run(`git add -- ${changed.map((f) => `"${f}"`).join(' ')}`)
+  runArgs('git', ['add', '--', ...changed]) // argv array, NO shell: an engine-named file can't inject
   run(`git commit -F "${msgFile}"`)
   return git('rev-parse HEAD')
 }
