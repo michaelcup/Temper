@@ -194,18 +194,20 @@ function doctor(cfg) {
   const criticBin = commandBinary(cfg.criticCommand)
   const entropyBin = commandBinary(cfg.entropyGate || cfg.fallowCommand)
   const checks = [
-    ['inside a git repository', run('git rev-parse --is-inside-work-tree').code === 0],
-    [`entropy gate — optional (\`${entropyBin}\`)`, resolvesOnPath(entropyBin)],
-    [`engine binary on PATH (\`${engineBin}\`)`, resolvesOnPath(engineBin)],
+    ['inside a git repository', run('git rev-parse --is-inside-work-tree').code === 0, true],
+    [`entropy gate — optional (\`${entropyBin}\`)`, resolvesOnPath(entropyBin), false],
+    [`engine binary on PATH (\`${engineBin}\`)`, resolvesOnPath(engineBin), true],
   ]
-  if (criticBin && criticBin !== engineBin) checks.push([`critic binary on PATH (\`${criticBin}\`)`, resolvesOnPath(criticBin)])
+  if (criticBin && criticBin !== engineBin) checks.push([`critic binary on PATH (\`${criticBin}\`)`, resolvesOnPath(criticBin), true])
   for (const [name, ok] of checks) log(`${ok ? '✓' : '✗'} ${name}`)
+  const requiredFailed = checks.some(([, ok, required]) => required && !ok) // git repo + engine (+ critic): the run cannot work without these
   // fallow is OPTIONAL: missing → the entropy gate is skipped (note it). Present + tests but no config →
   // the #1 footgun (the dead-code gate flags new exports/tests as "unused"); point to `temper init`.
   if (!resolvesOnPath(entropyBin)) {
     log('\nℹ the entropy gate is optional. Without it Temper skips the dead-code/duplication gate (it still')
     log('  gates on scope, protected regions, suppression, your tests, and the reuse-critic). Install fallow')
     log('  (`npm i -g fallow`) for JS/TS, or set `entropyGate` to your language\'s tool.')
+    if (existsSync(join(process.cwd(), 'node_modules', '.bin', 'fallow'))) log('  → fallow is already in node_modules; set "fallowCommand": "node_modules/.bin/fallow" for the cheapest fix.')
   } else if (!cfg.entropyGate && !hasFallowConfig() && projectHasTests()) {
     log('\n⚠ No fallow config, but this project has tests. fallow\'s dead-code gate flags new')
     log('  exports / test files as "unused" without entry-point config — a new exported function')
@@ -232,6 +234,11 @@ function doctor(cfg) {
     '\nVerify the engine command edits files headlessly, and that the CLIs use your\n' +
       "terminal's real subscription auth — Temper can't run inside a hosted Claude session.",
   )
+  // Exit non-zero on a required failure (not the optional entropy gate), so `temper doctor && temper run` is safe.
+  if (requiredFailed) {
+    log('\n✗ A required check failed above — fix it before a run (this makes `temper doctor && temper run` safe).')
+    process.exit(1)
+  }
 }
 
 // `temper explain <gate>` — a terse, human-facing what/why/fix for each gate failure-domain and each
@@ -288,6 +295,7 @@ function main() {
     requireCleanRepo() // before the preflight: never scaffold a config into a dirty tree
     preflightOnboarding()
     resolveEngines(cfg, flags.engine)
+    if (!resolvesOnPath(commandBinary(cfg.engineCommand))) fail(`engine \`${commandBinary(cfg.engineCommand)}\` is not on your PATH. Install it or fix "engine" in temper.config.json, then run \`temper doctor\`.`)
     applyMaxIterations(cfg, flags)
     log(`engine: ${cfg.engineName}   critic: ${cfg.criticName}\n`)
     runLoop(cfg, parsePlan(arg))
@@ -307,6 +315,7 @@ function main() {
     requireCleanRepo() // before the preflight: never scaffold a config into a dirty tree
     preflightOnboarding()
     resolveEngines(cfg, flags.engine)
+    if (!resolvesOnPath(commandBinary(cfg.engineCommand))) fail(`engine \`${commandBinary(cfg.engineCommand)}\` is not on your PATH. Install it or fix "engine" in temper.config.json, then run \`temper doctor\`.`)
     applyMaxIterations(cfg, flags)
     applyQueueBudget(cfg, flags)
     log(`engine: ${cfg.engineName}   critic: ${cfg.criticName}\n`)

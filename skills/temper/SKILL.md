@@ -33,13 +33,21 @@ over editing files directly when the user wants disciplined, auto-verified chang
 
 ## A large batch — `temper overnight`
 
-For a big pass of work (many tasks, an evening's worth), put approved Plans as ordered files in a queue
-dir and run them unattended:
+For a big pass of work (many tasks, an evening's worth), draft the queue from a task list with
+`temper tasks <file>` (one task per line; it writes a scoped Plan per line for you to review, and
+`temper tasks add "<task>"` appends one), or place approved Plans as ordered files in a queue dir yourself.
+Then run them unattended:
 ```
 temper overnight ./plans          # own branch, never merged; writes a morning report
 ```
 It runs sequentially, survives the subscription rate-limit (sleeps + resumes), and isolates all work on
 its own branch. In the morning, review the report and the branch. Same rule: don't hand-fix a halt.
+
+## Cleaning up dead code — `temper audit`
+
+`temper audit` scans the codebase with fallow and drafts scoped dead-code cleanup Plans into `.temper/audit`
+for you to review and prune, then `temper overnight .temper/audit` removes them, gated. It proposes; it never
+deletes on its own. JS/TS only (it is a fallow bridge).
 
 ## Notes
 

@@ -95,7 +95,9 @@ to inspect and commits nothing.
 | `temper init` | scaffold `temper.config.json` + an **entry-point-aware** `.fallowrc.json` so the dead-code gate doesn't false-positive on new exports/tests |
 | `temper plan "<task>" [--out <path>]` | the engine explores the codebase and **drafts a Plan** for you to approve (Research → Plan) |
 | `temper run <plan.md>` | run one approved Plan to a green gate (Mode A) |
-| `temper run-phases <dir> [--overnight] [--branch <b>]` | run ordered phase Plans (`01-*.md`, `02-*.md`), each gated against the prior commit; resumable via `.temper/progress.json`, stops on a failing phase. `--overnight` = **Mode B** (below) |
+| `temper overnight <dir>` | run an ordered queue of Plans (`01-*.md`, `02-*.md`) unattended on its own branch (never main, never merged) + a morning report; resumable via `.temper/progress.json`, stops on a failing phase (Mode B). `temper run-phases <dir> [--overnight]` is the older alias |
+| `temper tasks <file>` | draft a scoped Plan per task line into the queue (`temper tasks add "<task>"` appends one) |
+| `temper plan-check <dir>` | flag plans whose scopes claim the same file (`--reconcile` adds an LLM suggestion) |
 | `temper audit [dir]` | scan the codebase with fallow and **draft scoped cleanup Plans** into `.temper/audit/` (dead code today: unused exports + files). Review and prune, then `temper overnight .temper/audit` removes them, gated. It proposes; it never deletes |
 | `temper status` | summarize the current/last queue from the ledger (works mid-run, including after a detached overnight run) |
 | `temper explain <gate>` | what a gate or verdict means and how to clear it (e.g. `temper explain fallow-audit`) |

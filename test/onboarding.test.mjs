@@ -157,6 +157,52 @@ test('temper run fails fast when the acceptance command has a shell syntax error
   }
 })
 
+test('temper run fails fast when the engine binary is not on PATH (preflight, not a stuck escalation)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'temper-eng-'))
+  const g = (a) => execFileSync('git', a, { cwd: dir })
+  mkdirSync(join(dir, 'src'))
+  writeFileSync(join(dir, 'src', 'v.mjs'), 'export const V = 0\n')
+  writeFileSync(join(dir, '.fallowrc.json'), '{"entry":["src/**"]}\n')
+  writeFileSync(join(dir, 'temper.config.json'), JSON.stringify({ engines: { bad: { engine: 'definitely_not_a_binary_zzz {promptFile}', critic: 'true' } }, engine: 'bad', fallowCommand: 'true', criticMode: 'off' }))
+  writeFileSync(join(dir, 'PLAN.md'), `---\nscope:\n  - "src/**"\nacceptance: "true"\n---\n# t\nx\n`)
+  g(['init', '-q'])
+  g(['config', 'user.email', 'a@b.c'])
+  g(['config', 'user.name', 'a'])
+  g(['add', '-A'])
+  g(['commit', '-qm', 'seed'])
+  try {
+    const r = temper(dir, ['run', 'PLAN.md'])
+    assert.notEqual(r.code, 0, 'aborts before the loop')
+    assert.match(r.out, /not on your PATH/, 'names the missing engine binary instead of burning iterations')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('temper run surfaces a failed engine call instead of mislabeling it as no-changes', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'temper-engfail-'))
+  const g = (a) => execFileSync('git', a, { cwd: dir })
+  mkdirSync(join(dir, 'src'))
+  writeFileSync(join(dir, 'src', 'v.mjs'), 'export const V = 0\n')
+  writeFileSync(join(dir, '.fallowrc.json'), '{"entry":["src/**"]}\n')
+  writeFileSync(join(dir, 'temper.config.json'), JSON.stringify({ engines: { failing: { engine: "sh -c 'echo boom>&2; exit 1'", critic: 'true' } }, engine: 'failing', fallowCommand: 'true', criticMode: 'off', maxIterations: 3 }))
+  writeFileSync(join(dir, 'PLAN.md'), `---\nscope:\n  - "src/**"\nacceptance: "true"\n---\n# t\nx\n`)
+  g(['init', '-q'])
+  g(['config', 'user.email', 'a@b.c'])
+  g(['config', 'user.name', 'a'])
+  g(['add', '-A'])
+  g(['commit', '-qm', 'seed'])
+  try {
+    const r = temper(dir, ['run', 'PLAN.md'])
+    assert.notEqual(r.code, 0, 'a failed engine call ends the run')
+    assert.match(r.out, /engine command failed/, 'surfaces the engine failure as itself')
+    assert.match(r.out, /boom/, "shows the engine's own output")
+    assert.doesNotMatch(r.out, /STUCK/, 'does not burn iterations into a stuck no-changes escalation')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('a rejecting git hook does not produce a false-green commit', () => {
   const dir = mkdtempSync(join(tmpdir(), 'temper-hook-'))
   const g = (a) => execFileSync('git', a, { cwd: dir })

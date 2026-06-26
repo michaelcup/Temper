@@ -173,9 +173,22 @@ export function runPlan(cfg, plan, { baseSha }) {
     const iterStart = performance.now()
     log(`── iteration ${i} ──`)
     log('• engine: implementing…')
-    callCli(cfg.engineCommand, enginePrompt(plan, prevViolations), cfg)
+    const eng = callCli(cfg.engineCommand, enginePrompt(plan, prevViolations), cfg)
 
     const { violations, fired, firedFull, changed, deadNewFiles } = runGates(cfg, plan, baseSha)
+
+    // An engine call that exits non-zero AND changed nothing is almost always infra (auth 401, network, a
+    // broken engine command), not the model declining to edit. Surface its OWN output so this self-diagnoses
+    // instead of masquerading as a no-changes violation that burns iterations to a misleading escalation.
+    if (eng.code !== 0 && !changed.length) {
+      const out = stripAnsi(eng.out || '').trim()
+      log(`\n■ engine command failed (exit ${eng.code}) and changed nothing — usually auth or a network/CLI error, not a gate.`)
+      if (out) log(out.split('\n').slice(-8).map((l) => '    ' + l).join('\n'))
+      log(`  Command: ${cfg.engineCommand}`)
+      log('  If it is auth, run from a plain terminal where `claude` / `codex` hold your subscription, then `temper doctor`.')
+      log(`⏱ iteration ${i} took ${elapsed(iterStart)}  •  total ${elapsed(runStart)}`)
+      return { status: 'error', sha: baseSha, iterations: i, seconds: elapsed(runStart), violations: [`engine command failed (exit ${eng.code})`] }
+    }
 
     // R2 telemetry: per-iteration timing + which domains fired, plus the consecutive-fail streaks.
     history.push({ i, ms: performance.now() - iterStart, msgs: Object.fromEntries(fired) })
