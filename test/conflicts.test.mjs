@@ -127,3 +127,22 @@ test('temper tasks drafts a numbered Plan per task line and surfaces conflicts o
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('temper plan-check --reconcile adds the advisory verdict from the reconcile critic', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'temper-recon-'))
+  execFileSync('git', ['init', '-q'], { cwd: dir })
+  const verdict = '{"resolution":"drop","which":"A","why":"02 supersedes 01"}'
+  const critic = `printf -- '${verdict.replace(/\n/g, '\\n')}'`
+  writeFileSync(join(dir, 'temper.config.json'), JSON.stringify({ engines: { stub: { engine: 'true', critic } }, engine: 'stub' }))
+  mkdirSync(join(dir, 'phases'))
+  for (const [n, name] of [['01', 'a'], ['02', 'b']]) {
+    writeFileSync(join(dir, 'phases', `${n}-${name}.md`), `---\nscope:\n  - "src/loop.mjs"\nacceptance: "true"\n---\n# ${name}\nx\n`)
+  }
+  try {
+    const r = temperIn(dir, ['plan-check', 'phases', '--reconcile', '--engine', 'stub'])
+    assert.equal(r.code, 1, r.out) // conflict → exit 1
+    assert.match(r.out, /DROP A/, 'prints the reconcile critic advisory verdict')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

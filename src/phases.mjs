@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto'
 import { run, log, git, fail, requireCleanRepo, notify, state } from './sh.mjs'
 import { parsePlan, validatePlan, draftPlan } from './plan.mjs'
 import { runPlan } from './loop.mjs'
-import { runDirectionCheck } from './engine.mjs'
+import { runDirectionCheck, runReconcile } from './engine.mjs'
 import { detectScopeConflicts } from './conflicts.mjs'
 
 // Shown when a queue has no phase files yet — the missing on-ramp between Mode A and Mode B.
@@ -267,7 +267,7 @@ export function status(cfg) {
 // `temper plan-check <dir>` — surface scope conflicts in a phase queue BEFORE an overnight run: pairs of
 // Plans whose `scope:` allowlists claim a common file. Deterministic + conservative; these are DECLARED
 // (un-run) overlaps, so they're POTENTIAL clobbers to review, not confirmed verdicts. Returns the count.
-export function planCheck(dir) {
+export function planCheck(cfg, dir, reconcile = false) {
   const phases = discoverPhases(dir).map((file) => ({ file, plan: parsePlan(file) }))
   if (!phases.length) fail(`No phase plans (*.md) in ${dir}.\n${PHASE_HINT}`)
   const { conflicts, broad } = detectScopeConflicts(phases)
@@ -278,13 +278,23 @@ export function planCheck(dir) {
     log(`✓ no scope conflicts across ${phases.length} plan(s).`)
     return 0
   }
+  const byFile = new Map(phases.map((p) => [p.file, p.plan]))
   log(`\n⚠ ${conflicts.length} scope overlap(s) — plans that claim a common file:`)
   for (const c of conflicts) {
     log(`  • ${basename(c.a)} ↔ ${basename(c.b)}  (${[...new Set(c.globs.flat())].join(', ')})`)
+    // --reconcile: the ONE LLM judgment call, only on a detected conflict — does this pair truly contend?
+    if (reconcile) {
+      const v = runReconcile(cfg, byFile.get(c.a), byFile.get(c.b))
+      log(`      → ${v.resolution.toUpperCase()}${v.which && v.which !== 'both' ? ` ${v.which}` : ''}: ${v.why}`)
+    }
   }
-  log('\n  These are POTENTIAL conflicts (declared scope overlap), not confirmed — two plans can touch the')
-  log('  same file harmlessly. Review and merge/reorder where they truly contend; the per-phase gates still')
-  log('  catch a real clobber at the failing test.')
+  if (reconcile) {
+    log('\n  Advisory only — Temper never edits or drops a Plan for you. Resolve the queue by hand.')
+  } else {
+    log('\n  POTENTIAL conflicts (declared scope overlap), not confirmed — review them, or re-run with')
+    log('  --reconcile for an advisory drop/merge/consult suggestion on each. The per-phase gates still')
+    log('  catch a real clobber at the failing test.')
+  }
   return conflicts.length
 }
 

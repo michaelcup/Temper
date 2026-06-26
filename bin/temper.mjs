@@ -301,7 +301,8 @@ function main() {
   } else if (cmd === 'status') {
     status(cfg)
   } else if (cmd === 'plan-check') {
-    process.exit(planCheck(arg ?? cfg.phaseDir) ? 1 : 0)
+    if ('reconcile' in flags) resolveEngines(cfg, flags.engine)
+    process.exit(planCheck(cfg, arg ?? cfg.phaseDir, 'reconcile' in flags) ? 1 : 0)
   } else if (cmd === 'init') {
     runInit(flags)
   } else if (cmd === 'explain') {
@@ -325,7 +326,7 @@ function main() {
         '  temper tasks <file>           draft a scoped Plan per line of a task list into the overnight queue\n' +
         '  temper init [--agents]        scaffold config; --agents wires the Claude Code / Codex skill\n' +
         '  temper status                 summarize the current/last queue from the ledger\n' +
-        '  temper plan-check <dir>       flag queued plans whose scopes claim the same file (run before overnight)\n' +
+        '  temper plan-check <dir>       flag plans whose scopes claim the same file (--reconcile adds an LLM suggestion)\n' +
         '  temper explain <gate>         what a gate/verdict means + how to clear it\n' +
         '  temper doctor                 check prerequisites\n' +
         '  temper eval                   run the golden-task regression suite\n\n' +

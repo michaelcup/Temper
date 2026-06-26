@@ -184,3 +184,26 @@ export function runDirectionCheck(cfg, plan) {
   if (v && typeof v.sound === 'boolean') return { sound: v.sound, concern: v.concern ?? 'none', source: v.source ?? 'none' }
   return { sound: true, concern: 'none', source: 'none' } // fail-OPEN: no usable verdict must never block the queue
 }
+
+// Reconcile critic — the ONE judgment call in task orchestration. Invoked ONLY when the deterministic
+// detector finds two plans whose scopes claim a common file. It sees ONLY the two plans' titles + scope +
+// goal (never the code — context-thrift), and judges whether they truly contend and how to resolve it.
+// ADVISORY: the verdict is surfaced for the human, NEVER auto-applied (Temper never drops/merges a Plan
+// for you). Fail-OPEN to "consult" — defer to the human on any glitch.
+export function runReconcile(cfg, a, b) {
+  const one = (p) => `  title: ${p.title}\n  scope: ${p.scope.join(', ')}\n  goal: ${p.body.replace(/\s+/g, ' ').slice(0, 400)}`
+  const prompt =
+    'Two planned tasks have OVERLAPPING file scopes — they may edit the same file in sequence. Judge whether ' +
+    'they genuinely CONTEND for the same behavior or just coincidentally share a file, and if they contend, how ' +
+    'to resolve it. You see ONLY the two plans below (titles, scopes, goals) — not the code.\n\n' +
+    `PLAN A:\n${one(a)}\n\nPLAN B:\n${one(b)}\n\n` +
+    'Reply with ONLY a JSON object as the LAST line, no prose: ' +
+    '{"resolution": "independent"|"drop"|"merge"|"consult", "which": "A"|"B"|"both", "why": "one sentence"}.\n' +
+    'independent = same file, no real contention, run both. drop = one is redundant/superseded (name which). ' +
+    'merge = they should be one task (which absorbs which). consult = genuinely ambiguous, the human decides. ' +
+    'When unsure, choose consult.'
+  const { out } = callCli(cfg.criticCommand, prompt, cfg)
+  const v = lastJsonObject(out)
+  if (v && typeof v.resolution === 'string') return { resolution: v.resolution, which: v.which ?? 'both', why: v.why ?? '' }
+  return { resolution: 'consult', which: 'both', why: 'no usable verdict' } // fail-OPEN: defer to the human
+}
