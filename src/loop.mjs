@@ -291,6 +291,9 @@ export function runLoop(cfg, plan) {
   const v = runPlan(cfg, plan, { baseSha: git('rev-parse HEAD') })
   notify(cfg, v.status, { summary: `temper run "${plan.title}": ${v.status}` })
   if (v.status === 'committed') return
+  // Mode A leaves the failed attempt in the working tree (overnight resets on exit), so tell the user how to
+  // discard it; otherwise the next `temper run` aborts on the leftover dirty tree.
+  log('\nTo discard this attempt and return to a clean base (after reviewing the diff): git restore . && git clean -fd')
   if (v.status === 'halted') process.exit(2)
   if (v.status === 'escalated') process.exit(4)
   if (v.status === 'gamed') process.exit(5)

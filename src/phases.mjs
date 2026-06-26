@@ -253,7 +253,7 @@ export function runPhases(cfg, dir, opts = {}) {
   if (conflicts.length) {
     log(`ℹ ${conflicts.length} declared scope overlap(s) — plans whose \`scope:\` lists a common file:`)
     for (const c of conflicts) log(`   ${basename(c.a)} ↔ ${basename(c.b)}`)
-    log(`  Conservative (declared, pre-run). Building up one file across phases is fine — the morning report`)
+    log(`  Conservative (declared, pre-run). Building up one file across phases is fine; the morning report`)
     log(`  confirms each against actual edits and flags only a real rewrite. \`plan-check ${dir} --reconcile\` checks intent.\n`)
   }
   logEstimate(cfg, phases.length)
@@ -389,14 +389,14 @@ export function planCheck(cfg, dir, reconcile = false) {
   logEstimate(cfg, phases.length) // a read-only preview of the run's cost, before you commit to the night
   const { conflicts, broad } = detectScopeConflicts(phases)
   for (const b of broad) {
-    log(`⚠ ${basename(b.file)}: broad scope (${b.globs.join(', ')}) — narrow it so conflict detection stays useful.`)
+    log(`⚠ ${basename(b.file)}: broad scope (${b.globs.join(', ')}); narrow it so conflict detection stays useful.`)
   }
   if (!conflicts.length) {
     log(`✓ no scope conflicts across ${phases.length} plan(s).`)
     return 0
   }
   const byFile = new Map(phases.map((p) => [p.file, p.plan]))
-  log(`\n⚠ ${conflicts.length} scope overlap(s) — plans that claim a common file:`)
+  log(`\nℹ ${conflicts.length} declared scope overlap(s), plans that claim a common file:`)
   for (const c of conflicts) {
     log(`  • ${basename(c.a)} ↔ ${basename(c.b)}  (${[...new Set(c.globs.flat())].join(', ')})`)
     // --reconcile: the ONE LLM judgment call, only on a detected conflict — does this pair truly contend?
@@ -421,7 +421,11 @@ export function planCheck(cfg, dir, reconcile = false) {
 // primitives: per-line draftPlan + the deterministic detector. Decomposition stays a human job: every
 // drafted Plan is reviewed/approved before `temper overnight`.
 export function runTasks(cfg, taskFile, dir) {
-  if (!taskFile || !existsSync(taskFile)) fail('Usage: temper tasks <file>  (a plain-text list of tasks, one per line)')
+  if (!taskFile || !existsSync(taskFile)) {
+    // `temper tasks "fix the bug"` is a common mistake — the verb takes a FILE; an inline task goes through `add`.
+    const looksInline = taskFile && (taskFile.includes(' ') || !/\.(txt|md)$/i.test(taskFile))
+    fail(`Usage: temper tasks <file> (a plain-text list of tasks, one per line).${looksInline ? `\n  To queue a single inline task, use: temper tasks add ${JSON.stringify(taskFile)}` : ''}`)
+  }
   const tasks = readFileSync(taskFile, 'utf8')
     .split('\n')
     .map((l) => l.trim())
@@ -448,9 +452,9 @@ export function runTasks(cfg, taskFile, dir) {
   })
   log(`\n✓ drafted ${phases.length}/${tasks.length} Plan(s) into ${dir}. REVIEW + APPROVE each (scope + spec + acceptance), then \`temper overnight ${dir}\`.`)
   const { conflicts, broad } = detectScopeConflicts(phases)
-  for (const b of broad) log(`⚠ ${basename(b.file)}: broad scope (${b.globs.join(', ')}) — narrow it.`)
+  for (const b of broad) log(`⚠ ${basename(b.file)}: broad scope (${b.globs.join(', ')}); narrow it.`)
   if (conflicts.length) {
-    log(`\n⚠ ${conflicts.length} scope overlap(s) to resolve before running:`)
+    log(`\nℹ ${conflicts.length} declared scope overlap(s) to review before running:`)
     for (const c of conflicts) log(`  • ${basename(c.a)} ↔ ${basename(c.b)}  (${[...new Set(c.globs.flat())].join(', ')})`)
   } else if (phases.length > 1) {
     log('✓ no scope conflicts across the drafted plans.')
