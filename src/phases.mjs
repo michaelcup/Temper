@@ -8,7 +8,7 @@ import { run, log, git, fail, requireCleanRepo, notify, state } from './sh.mjs'
 import { parsePlan, validatePlan, draftPlan } from './plan.mjs'
 import { runPlan } from './loop.mjs'
 import { runDirectionCheck, runReconcile } from './engine.mjs'
-import { detectScopeConflicts } from './conflicts.mjs'
+import { detectScopeConflicts, scopesOverlap } from './conflicts.mjs'
 
 // Shown when a queue has no phase files yet — the missing on-ramp between Mode A and Mode B.
 const PHASE_HINT =
@@ -345,5 +345,42 @@ export function runTasks(cfg, taskFile, dir) {
     for (const c of conflicts) log(`  • ${basename(c.a)} ↔ ${basename(c.b)}  (${[...new Set(c.globs.flat())].join(', ')})`)
   } else if (phases.length > 1) {
     log('✓ no scope conflicts across the drafted plans.')
+  }
+}
+
+// `temper tasks add "<task>" [--dir <queue>] [--reconcile]` — draft ONE new task into an existing queue and
+// classify its overlap with each existing plan by LEDGER status: a COMMITTED phase ⇒ the new task builds on
+// done work (a note); a PENDING (queued / not-yet-committed) phase ⇒ a planned collision to review (advisory,
+// plus the reconcile suggestion with --reconcile). Status is DERIVED from the ledger (no stored reservation
+// or lock — adding to the dir mid-run is harmless: the running queue snapshotted its phases at start, so a
+// new task simply waits for the next run/resume).
+export function addTask(cfg, task, dir, reconcile = false) {
+  if (!task) fail('Usage: temper tasks add "<task>" [--dir <queue>]')
+  if (!existsSync(dir)) fail(`No queue at ${dir} — create one with \`temper tasks <file>\` first.`)
+  const existing = discoverPhases(dir).map((file) => ({ file, plan: parsePlan(file) }))
+  const committed = new Set(loadLedger(cfg.progressFile).filter((e) => e.status === 'committed').map((e) => e.file))
+  const nums = existing.map((p) => parseInt(basename(p.file), 10)).filter((n) => !Number.isNaN(n))
+  const next = String((nums.length ? Math.max(...nums) : 0) + 1).padStart(2, '0')
+  const slug = task.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'task'
+  const file = join(dir, `${next}-${slug}.md`)
+  log(`drafting: ${task}\n`)
+  const planText = draftPlan(cfg, task)
+  writeFileSync(file, planText)
+  const fm = planText.match(/^---\n([\s\S]*?)\n---/)
+  if (!(fm && /\bscope:/.test(fm[1]) && /^\s*-\s+\S/m.test(fm[1]))) {
+    return log(`⚠ ${basename(file)} — draft is missing a scope/frontmatter block; edit it into shape before running.`)
+  }
+  const plan = parsePlan(file)
+  log(`✓ added ${basename(file)} (scope: ${plan.scope.join(', ')})`)
+  const hits = existing.map((p) => ({ p, globs: scopesOverlap(plan.scope, p.plan.scope) })).filter((x) => x.globs.length)
+  if (!hits.length) return log('✓ no scope overlap with the existing queue.')
+  log(`\n⚠ overlaps with ${hits.length} existing plan(s):`)
+  for (const { p, globs } of hits) {
+    const done = committed.has(p.file)
+    log(`  • ${basename(p.file)} [${done ? 'DONE — your task builds on committed work' : 'QUEUED — a planned collision; review'}]  (${[...new Set(globs.flat())].join(', ')})`)
+    if (reconcile && !done) {
+      const v = runReconcile(cfg, plan, p.plan)
+      log(`      → ${v.resolution.toUpperCase()}${v.which && v.which !== 'both' ? ` ${v.which}` : ''}: ${v.why}`)
+    }
   }
 }

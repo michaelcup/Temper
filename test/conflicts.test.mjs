@@ -4,7 +4,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readdirSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readdirSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -142,6 +142,28 @@ test('temper plan-check --reconcile adds the advisory verdict from the reconcile
     const r = temperIn(dir, ['plan-check', 'phases', '--reconcile', '--engine', 'stub'])
     assert.equal(r.code, 1, r.out) // conflict → exit 1
     assert.match(r.out, /DROP A/, 'prints the reconcile critic advisory verdict')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('temper tasks add appends a numbered Plan and classifies overlap by ledger status', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'temper-add-'))
+  execFileSync('git', ['init', '-q'], { cwd: dir })
+  const planText = '---\nscope:\n  - "src/x.mjs"\nacceptance: "true"\n---\n# new\nx\n'
+  const critic = `printf -- '${planText.replace(/\n/g, '\\n')}'`
+  writeFileSync(join(dir, 'temper.config.json'), JSON.stringify({ engines: { stub: { engine: 'true', critic } }, engine: 'stub' }))
+  mkdirSync(join(dir, '.temper', 'phases'), { recursive: true })
+  writeFileSync(join(dir, '.temper', 'phases', '01-existing.md'), '---\nscope:\n  - "src/x.mjs"\nacceptance: "true"\n---\n# existing\nx\n')
+  // a ledger marking the existing plan COMMITTED. Ledger keys are absolute + canonical (discoverPhases
+  // derives them from process.cwd(), which realpath-resolves the macOS /var → /private/var symlink).
+  const existingAbs = join(realpathSync(dir), '.temper', 'phases', '01-existing.md')
+  writeFileSync(join(dir, '.temper', 'progress.json'), JSON.stringify([{ file: existingAbs, status: 'committed', title: 'existing' }]))
+  try {
+    const r = temperIn(dir, ['tasks', 'add', 'add a thing', '--engine', 'stub'])
+    assert.equal(r.code, 0, r.out)
+    assert.match(r.out, /02-add-a-thing/, 'appends as the next number')
+    assert.match(r.out, /DONE — your task builds on committed work/, 'classifies overlap with a committed phase as DONE')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

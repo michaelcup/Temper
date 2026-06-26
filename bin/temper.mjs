@@ -16,7 +16,7 @@ import { run, log, fail, requireCleanRepo, commandBinary, resolvesOnPath } from 
 import { loadConfig, resolveEngines, applyMaxIterations, applyQueueBudget, hasFallowConfig, projectHasTests, hasPackageEntry, DEFAULTS } from '../src/config.mjs'
 import { parsePlan, runPlanDraft } from '../src/plan.mjs'
 import { runLoop } from '../src/loop.mjs'
-import { runPhases, status, planCheck, runTasks } from '../src/phases.mjs'
+import { runPhases, status, planCheck, runTasks, addTask } from '../src/phases.mjs'
 import { runEval } from '../src/eval.mjs'
 
 function parseArgs(argv) {
@@ -287,7 +287,9 @@ function main() {
   } else if (cmd === 'tasks') {
     resolveEngines(cfg, flags.engine)
     log(`drafting engine: ${cfg.criticName} (read-only)\n`)
-    runTasks(cfg, arg, typeof flags.dir === 'string' ? flags.dir : cfg.phaseDir)
+    const queueDir = typeof flags.dir === 'string' ? flags.dir : cfg.phaseDir
+    if (arg === 'add') addTask(cfg, positionals[2], queueDir, 'reconcile' in flags)
+    else runTasks(cfg, arg, queueDir)
   } else if (cmd === 'overnight' || cmd === 'run-phases') {
     requireCleanRepo() // before the preflight: never scaffold a config into a dirty tree
     preflightOnboarding()
@@ -323,7 +325,7 @@ function main() {
         '  temper run <plan.md>          run one approved Plan to a green gate\n' +
         '  temper overnight <dir>        work an ordered queue of Plans unattended — own branch + morning report\n\n' +
         '  temper plan "<task>"          draft a Plan from the codebase for you to approve\n' +
-        '  temper tasks <file>           draft a scoped Plan per line of a task list into the overnight queue\n' +
+        '  temper tasks <file>           draft a scoped Plan per task line into the queue (add "<task>" to append one)\n' +
         '  temper init [--agents]        scaffold config; --agents wires the Claude Code / Codex skill\n' +
         '  temper status                 summarize the current/last queue from the ledger\n' +
         '  temper plan-check <dir>       flag plans whose scopes claim the same file (--reconcile adds an LLM suggestion)\n' +
