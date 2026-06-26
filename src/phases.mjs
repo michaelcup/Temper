@@ -157,6 +157,10 @@ function writeReport(cfg, { dir, branch, base, ledger, phases, outcome, stoppedA
   md += `- **Outcome:** ${outcome}\n- **Generated:** ${new Date().toISOString()}\n\n`
   md += `| # | phase | status | commit | iters | time |\n|---|---|---|---|---|---|\n${rows.join('\n')}\n\n`
   md += `**Committed:** ${committed.length}/${phases.length}${committedShas.length ? ` — ${committedShas.map((s) => s.slice(0, 9)).join(', ')}` : ''}\n`
+  // Confirm the moat actually ran: a committed phase with a held-out check passed it (commit is gated behind it).
+  // An overnight user reads this report, not the live log, so without it they can't tell the moat fired at all.
+  const heldCount = committed.filter((e) => e.heldout).length
+  if (heldCount) md += `**Held-out moat:** ${heldCount} committed phase(s) passed a hidden held-out check.\n`
   if (stopped) {
     const gate = stopped.stuckDomain ? ` — the \`${mdCell(stopped.stuckDomain)}\` gate` : ''
     md += `\n**Stopped at phase ${stopped.phase}** "${mdCell(stopped.title)}"${gate} (${stopped.status})\n`
@@ -320,7 +324,7 @@ export function runPhases(cfg, dir, opts = {}) {
     }
     const v = runPlan(cfg, plan, { baseSha })
     totalIters += v.iterations ?? 0
-    const entry = { phase: n + 1, file, title: plan.title, fingerprint, status: v.status, sha: v.sha, iterations: v.iterations, seconds: v.seconds, branch, base, stuckDomain: v.stuckDomain, critic: v.critic, direction, violations: v.status === 'committed' ? undefined : v.violations }
+    const entry = { phase: n + 1, file, title: plan.title, fingerprint, status: v.status, sha: v.sha, iterations: v.iterations, seconds: v.seconds, branch, base, stuckDomain: v.stuckDomain, critic: v.critic, direction, heldout: v.heldout, violations: v.status === 'committed' ? undefined : v.violations }
     const idx = ledger.findIndex((e) => e.file === file)
     if (idx >= 0) ledger[idx] = entry
     else ledger.push(entry)

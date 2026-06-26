@@ -234,6 +234,7 @@ export function runPlan(cfg, plan, { baseSha }) {
     // here means the gates were gamed or insufficient. One-shot: escalate, never re-prompt
     // (the research warns iterating against a hidden check just teaches gaming).
     if (plan.heldout) {
+      log(`• held-out check: ${plan.heldout}`) // announce the moat ran (it never reaches the engine — temper's stdout is the user's)
       const h = run(plan.heldout)
       if (h.code === 126 || h.code === 127) {
         // Command-not-found / not-executable is an infra error, NOT gaming — don't mislabel it.
@@ -260,7 +261,7 @@ export function runPlan(cfg, plan, { baseSha }) {
     }
     log(`\n✓ gate green — committed "${cfg.commitPrefix} ${plan.title}"`)
     log(`⏱ iteration ${i} took ${elapsed(iterStart)}  •  total ${elapsed(runStart)}`)
-    return { status: 'committed', sha: c.sha, iterations: i, seconds: elapsed(runStart), violations: [], critic }
+    return { status: 'committed', sha: c.sha, iterations: i, seconds: elapsed(runStart), violations: [], critic, heldout: !!plan.heldout }
   }
 
   log(`\n■ Reached ${cfg.maxIterations} iterations without a green gate (no single failure-domain stuck). Nothing committed; review the working tree.`)

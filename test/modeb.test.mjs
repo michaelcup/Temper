@@ -23,9 +23,10 @@ function setup(config, phases) {
   writeFileSync(join(dir, '.gitignore'), '.temper/\n')
   writeFileSync(join(dir, 'src', 'v.mjs'), 'export const V = 0\n')
   writeFileSync(join(dir, 'temper.config.json'), JSON.stringify(config, null, 2))
-  phases.forEach(([name, body, scope, acceptance], i) => {
+  phases.forEach(([name, body, scope, acceptance, heldout], i) => {
     const sc = (scope ?? ['src/**']).map((s) => `  - "${s}"`).join('\n')
-    const fm = `---\nscope:\n${sc}\nacceptance: "${acceptance ?? 'node --check src/v.mjs'}"\n---\n# ${name}\n${body}\n`
+    const held = heldout ? `heldout: "${heldout}"\n` : ''
+    const fm = `---\nscope:\n${sc}\nacceptance: "${acceptance ?? 'node --check src/v.mjs'}"\n${held}---\n# ${name}\n${body}\n`
     writeFileSync(join(dir, '.temper', 'phases', `0${i + 1}-${name}.md`), fm)
   })
   g(['init', '-q'])
@@ -123,6 +124,21 @@ test('the morning report FLAGS a real conflict when a later phase rewrites a sha
     const report = readFileSync(join(dir, '.temper', 'report.md'), 'utf8')
     assert.match(report, /\*\*Scope conflicts\*\*/, 'a rewrite of a shared file is a real conflict')
     assert.match(report, /rewrote lines/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('a passing held-out check is announced in the live log AND confirmed in the morning report', () => {
+  const dir = setup(baseCfg(), [
+    ['one', 'x', ['src/v.mjs'], 'node --check src/v.mjs', 'true'], // a held-out (moat) that passes
+  ])
+  try {
+    const r = temper(dir, ['run-phases', '.temper/phases', '--engine', 'stub'])
+    assert.equal(r.code, 0, r.out)
+    assert.match(r.out, /held-out check: true/, 'the moat is announced in the live log, not silent on success')
+    const report = readFileSync(join(dir, '.temper', 'report.md'), 'utf8')
+    assert.match(report, /Held-out moat:/, 'the morning report (what an overnight user reads) confirms the moat ran')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
