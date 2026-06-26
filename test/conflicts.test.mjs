@@ -9,6 +9,43 @@ import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { globsOverlap, broadScopes, detectScopeConflicts } from '../src/conflicts.mjs'
+import { confirmConflict } from '../src/phases.mjs'
+
+test('confirmConflict (blame-based): a later phase that rewrites only an EARLIER phase\'s lines flags that pair, not others', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'temper-blame-'))
+  const cwd0 = process.cwd()
+  const g = (a) => execFileSync('git', a, { cwd: dir })
+  const w = (c) => writeFileSync(join(dir, 'v.txt'), c)
+  g(['init', '-q'])
+  g(['config', 'user.email', 'a@b.c'])
+  g(['config', 'user.name', 'a'])
+  w('L1\nL2\nL3\n')
+  g(['add', '-A'])
+  g(['commit', '-qm', 'seed'])
+  w('L1-edited\nL2\nL3\n') // phase 1 rewrites L1
+  g(['commit', '-aqm', 'p1'])
+  const sha1 = g(['rev-parse', 'HEAD']).toString().trim()
+  w('L1-edited\nL2\nL3-edited\n') // phase 2 rewrites L3
+  g(['commit', '-aqm', 'p2'])
+  const sha2 = g(['rev-parse', 'HEAD']).toString().trim()
+  w('L1-again\nL2\nL3-edited\n') // phase 3 rewrites L1 again (phase 1's line)
+  g(['commit', '-aqm', 'p3'])
+  const sha3 = g(['rev-parse', 'HEAD']).toString().trim()
+  const ledger = [
+    { file: 'p1', phase: 1, status: 'committed', sha: sha1 },
+    { file: 'p2', phase: 2, status: 'committed', sha: sha2 },
+    { file: 'p3', phase: 3, status: 'committed', sha: sha3 },
+  ]
+  try {
+    process.chdir(dir)
+    assert.equal(confirmConflict({ a: 'p1', b: 'p3' }, ledger).real, true, 'phase 3 rewrote phase 1\'s line → real')
+    assert.equal(confirmConflict({ a: 'p2', b: 'p3' }, ledger).real, false, 'phase 3 did NOT touch phase 2\'s line → benign')
+    assert.equal(confirmConflict({ a: 'p1', b: 'p2' }, ledger).real, false, 'phase 1 (L1) and phase 2 (L3) touched different lines → benign')
+  } finally {
+    process.chdir(cwd0)
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
 
 test('globsOverlap: literals, nested globs, hub files, disjoint dirs', () => {
   assert.equal(globsOverlap('src/x.mjs', 'src/x.mjs'), true, 'identical')

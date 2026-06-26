@@ -88,13 +88,15 @@ const exitCodeFor = (status) => (status === 'halted' ? 2 : status === 'escalated
 // command output) can't break the report table or inject headings/fences. One line, no pipes, no fences.
 const mdCell = (s) => String(s).replace(/\r?\n+/g, ' ').replace(/\|/g, '\\|').replace(/`/g, "'")
 
-// Confirm a DECLARED scope overlap against what the phases ACTUALLY committed. Two phases can claim the
-// same file yet not contend: in a sequential gated queue, a later phase that only ADDS to a shared file (a
-// new helper) built ON the earlier phase's committed result — it didn't clobber it. Returns {real, note}, or
-// null if it can't be confirmed yet (a phase hasn't committed). Each phase is one commit, so `<sha>~1..<sha>`
-// is its own diff; git --numstat's deleted-count > 0 on a shared file ⇒ the later phase rewrote existing
-// lines (a possible clobber), additions-only ⇒ benign. All paths go through runArgs (no shell).
-function confirmConflict(conflict, ledger) {
+// Confirm a DECLARED scope overlap against what the phases ACTUALLY committed. Two phases can claim the same
+// file yet not contend: in a sequential gated queue, a later phase that only ADDS to a shared file, or that
+// rewrites a DIFFERENT region than the earlier phase wrote, didn't clobber it. The precise test (git blame):
+// of the exact lines the later phase deleted/modified (--unified=0, so no context), were ANY authored by the
+// EARLIER phase's commit? Blame handles non-consecutive phases (it tracks authorship across the phases in
+// between) that a raw line-range can't. Returns {real, note}, or null if a phase hasn't committed. All git
+// calls go through runArgs (no shell — engine-named filenames stay inert). Each phase is one commit, so
+// `<sha>~1..<sha>` is its own diff and `<sha>~1` is the state it edited.
+export function confirmConflict(conflict, ledger) {
   const ea = ledger.find((e) => e.file === conflict.a)
   const eb = ledger.find((e) => e.file === conflict.b)
   if (!(ea?.status === 'committed' && eb?.status === 'committed')) return null
@@ -102,12 +104,21 @@ function confirmConflict(conflict, ledger) {
   const changed = (e) => runArgs('git', ['diff', '--name-only', `${e.sha}~1`, e.sha]).out.split('\n').filter(Boolean)
   const shared = changed(earlier).filter((f) => changed(later).includes(f))
   if (!shared.length) return { real: false, note: 'declared overlap, but they edited different files' }
-  const clobbered = shared.filter((f) => {
-    const cols = runArgs('git', ['diff', '--numstat', `${later.sha}~1`, later.sha, '--', f]).out.trim().split('\t')
-    return (parseInt(cols[1], 10) || 0) > 0 // the later phase DELETED/modified existing lines of f
+  const hits = shared.filter((f) => {
+    // the exact lines the LATER phase deleted/modified in f (no context), in its base (<later.sha>~1) coords
+    const touched = []
+    for (const m of runArgs('git', ['diff', '--unified=0', `${later.sha}~1`, later.sha, '--', f]).out.matchAll(/^@@ -(\d+)(?:,(\d+))? \+/gm)) {
+      const count = m[2] === undefined ? 1 : +m[2]
+      for (let ln = +m[1]; ln < +m[1] + count; ln++) touched.push(ln) // count 0 (pure addition) ⇒ nothing pushed
+    }
+    if (!touched.length) return false
+    // who authored each line at the later phase's base? (porcelain header: `<40-sha> <orig> <final>` per line)
+    const authorOf = new Map()
+    for (const m of runArgs('git', ['blame', '--porcelain', `${later.sha}~1`, '--', f]).out.matchAll(/^([0-9a-f]{40}) \d+ (\d+)/gm)) authorOf.set(+m[2], m[1])
+    return touched.some((ln) => authorOf.get(ln) === earlier.sha) // did the later phase rewrite a line EARLIER authored?
   })
-  if (clobbered.length) return { real: true, note: `phase ${later.phase} rewrote lines of ${clobbered.join(', ')} that phase ${earlier.phase} touched — review` }
-  return { real: false, note: `phase ${later.phase} only added to ${shared.join(', ')} — additive, no clobber` }
+  if (hits.length) return { real: true, note: `phase ${later.phase} rewrote lines of ${hits.join(', ')} that phase ${earlier.phase} authored — review` }
+  return { real: false, note: `phase ${later.phase} touched ${shared.join(', ')} but not phase ${earlier.phase}'s lines — additive` }
 }
 
 // The morning report (Mode B): synthesized from the ledger so it survives a detached run.
