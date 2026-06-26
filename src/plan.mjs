@@ -13,7 +13,11 @@ export function parsePlan(path) {
   const m = raw.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/)
   if (!m) fail('Plan must start with a `---` frontmatter block — see templates/PLAN.template.md.')
   const [, front, body] = m
-  const scope = [...front.matchAll(/^\s*-\s+(.+)$/gm)].map((x) => x[1].trim().replace(/^["']|["']$/g, ''))
+  // ONLY the bullets directly under the `scope:` key are the allowlist (the primary containment boundary).
+  // Reading every `- ` in the frontmatter let a stray bullet under another key (reviewers:, tags:, notes:) —
+  // or a sneaked `- "**"` in an engine-drafted, skim-reviewed plan — silently widen scope to the whole repo.
+  const scopeBlock = front.match(/^scope:[ \t]*\n((?:[ \t]+-[ \t]+.+\n?)+)/m)
+  const scope = scopeBlock ? [...scopeBlock[1].matchAll(/^[ \t]+-[ \t]+(.+)$/gm)].map((x) => x[1].trim().replace(/^["']|["']$/g, '')) : []
   const acc = front.match(/^acceptance:\s*(.+)$/m)
   const held = front.match(/^heldout:\s*(.+)$/m)
   const title = body.match(/^#\s+(.+)$/m)
@@ -50,6 +54,15 @@ export function validatePlan(plan) {
   const bin = commandBinary(plan.acceptance)
   if (bin && /^[\w./-]/.test(bin) && !resolvesOnPath(bin)) {
     fail(`Acceptance command isn't runnable: \`${plan.acceptance}\` (\`${bin}\` is not on your PATH). Fix it — the loop would read this as a failing test and burn iterations.`)
+  }
+  // Same guard for the held-out command — a broken one is WORSE: a non-zero exit reads as GAMED, so it
+  // would falsely reject correct work as reward-hacking. (A syntax error inside the command still slips
+  // past a binary check — the loop now surfaces the held-out's output so that case is self-diagnosing.)
+  if (plan.heldout) {
+    const hbin = commandBinary(plan.heldout)
+    if (hbin && /^[\w./-]/.test(hbin) && !resolvesOnPath(hbin)) {
+      fail(`Held-out command isn't runnable: \`${plan.heldout}\` (\`${hbin}\` is not on your PATH). Fix it — a broken held-out reads as GAMED and rejects correct work.`)
+    }
   }
 }
 

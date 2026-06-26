@@ -7,8 +7,32 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync } from 'node:
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { parsePlan } from '../src/plan.mjs'
+import { inScope } from '../src/gates.mjs'
 
 const TEMPER = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'temper.mjs')
+
+test('parsePlan reads scope ONLY from the scope: block — a stray bullet under another key cannot widen it', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'temper-scope-'))
+  const file = join(dir, 'p.md')
+  writeFileSync(file, '---\nscope:\n  - "src/a.js"\nreviewers:\n  - "**"\nacceptance: "true"\n---\n# t\nbody\n')
+  try {
+    const plan = parsePlan(file)
+    assert.deepEqual(plan.scope, ['src/a.js'], 'only the scope: bullet, not the reviewers: bullet')
+    assert.ok(!inScope('totally/unrelated.go', plan.scope), 'a stray ** under another key must not admit arbitrary files')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('globToRegExp: **/<suffix> matches at a path boundary, not arbitrary filename prefixes', () => {
+  assert.equal(inScope('src/config.json', ['**/config.json']), true, 'a real path matches')
+  assert.equal(inScope('config.json', ['**/config.json']), true, 'top-level matches')
+  assert.equal(inScope('evilconfig.json', ['**/config.json']), false, 'a prefix-glued name must NOT match')
+  assert.equal(inScope('src/aaautil.js', ['src/**/util.js']), false, 'src/**/util.js must not match src/aaautil.js')
+  assert.equal(inScope('src/a/util.js', ['src/**/util.js']), true, 'but it matches a genuinely nested path')
+  assert.equal(inScope('src/x.mjs', ['src/**']), true, 'src/** is unchanged')
+})
 
 test('a malicious engine-created in-scope filename cannot inject shell (the git gate/commit path)', () => {
   const dir = mkdtempSync(join(tmpdir(), 'temper-rce-'))

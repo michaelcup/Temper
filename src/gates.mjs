@@ -38,9 +38,13 @@ export function globToRegExp(glob) {
   for (let i = 0; i < glob.length; i++) {
     const c = glob[i]
     if (c === '*' && glob[i + 1] === '*') {
-      re += '.*'
-      i++
-      if (glob[i + 1] === '/') i++
+      i++ // consume the second *
+      if (glob[i + 1] === '/') {
+        // `**/` = an OPTIONAL directory prefix anchored at a path boundary — NOT a bare `.*`. The old
+        // `.*` (dropping the slash) made `**/config.json` match `evilconfig.json` — the scope gate over-admitting.
+        re += '(?:.*/)?'
+        i++ // consume the /
+      } else re += '.*' // bare/trailing `**` still means "anything" (e.g. `src/**`)
     } else if (c === '*') re += '[^/]*'
     else if (c === '?') re += '[^/]'
     else if ('.+^${}()|[]\\/'.includes(c)) re += '\\' + c
