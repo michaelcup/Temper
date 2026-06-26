@@ -123,7 +123,7 @@ test('the morning report FLAGS a real conflict when a later phase rewrites a sha
     assert.equal(r.code, 0, r.out)
     const report = readFileSync(join(dir, '.temper', 'report.md'), 'utf8')
     assert.match(report, /\*\*Scope conflicts\*\*/, 'a rewrite of a shared file is a real conflict')
-    assert.match(report, /rewrote lines/)
+    assert.match(report, /changed lines/)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

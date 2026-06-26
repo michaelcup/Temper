@@ -127,7 +127,7 @@ export function confirmConflict(conflict, ledger) {
     for (const m of runArgs('git', ['blame', '--porcelain', laterBase, '--', f]).out.matchAll(/^([0-9a-f]{40}) \d+ (\d+)/gm)) authorOf.set(+m[2], m[1])
     return touched.some((ln) => authorOf.get(ln) === earlier.sha) // did the later phase rewrite a line EARLIER authored?
   })
-  if (hits.length) return { real: true, note: `phase ${later.phase} rewrote lines of ${hits.join(', ')} that phase ${earlier.phase} authored — review` }
+  if (hits.length) return { real: true, note: `phase ${later.phase} changed lines of ${hits.join(', ')} that phase ${earlier.phase} wrote` }
   return { real: false, note: `phase ${later.phase} touched ${shared.join(', ')} but not phase ${earlier.phase}'s lines — additive` }
 }
 
@@ -191,8 +191,9 @@ function writeReport(cfg, { dir, branch, base, ledger, phases, outcome, stoppedA
     const benign = judged.filter((x) => x.v && !x.v.real)
     const unconfirmed = judged.filter((x) => x.v === null) // a pair whose phase didn't commit (a stopped/failed run)
     if (real.length) {
-      md += `\n**Scope conflicts** (a later phase rewrote a file an earlier one touched — review before you merge):\n`
+      md += `\n**Scope conflicts** — a later phase changed lines an earlier phase wrote in a shared file:\n`
       md += real.map((x) => `- ${pair(x)}: ${mdCell(x.v.note)}`).join('\n') + '\n'
+      md += `_Often an additive edit (a widened import, a new test beside an old one); occasionally a real rewrite — glance at each to confirm._\n`
     }
     // Surface each benign verdict with its OWN reason (additive vs edited-different-files) rather than one
     // blanket label — and never silently drop a pair: an unconfirmed overlap (a phase in it didn't commit, so
