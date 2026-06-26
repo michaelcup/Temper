@@ -169,6 +169,13 @@ function runInit(flags = {}) {
   const wantAgents = 'agents' in flags ? true : 'no-agents' in flags ? false : existsSync(join(cwd, '.claude')) || existsSync(join(cwd, 'AGENTS.md'))
   if (wantAgents) wrote.push(...wireAgents(cwd))
   log(wrote.length ? `✓ wrote ${wrote.join(', ')}` : '✓ already configured (temper.config.json + a fallow config both present)')
+  // The no-entry-points footgun, surfaced at scaffold time (not only if the user separately runs doctor):
+  // fallow measures dead code from entry points, so with none the first change can be blamed for inherited dead code.
+  if (!projectHasTests() && !hasPackageEntry()) {
+    log('\n⚠ No fallow entry points yet (no tests, no package.json exports/main/bin). fallow measures dead code')
+    log('  from entry points, so your first change that adds one can flag pre-existing unused code as "introduced".')
+    log('  Add an entry point (a test, or package.json exports/main/bin) before your first run.')
+  }
   log('\nNext:')
   log('  • Make sure your public API is in package.json "exports"/"main"/"bin" (fallow treats those')
   log('    as entry points), or add globs to .fallowrc.json "entry".')
@@ -291,14 +298,16 @@ function main() {
   const [cmd, arg] = positionals
   const cfg = loadConfig()
   if (cmd === 'run') {
-    if (!arg) fail('Usage: temper run <plan.md> [--engine <name>] [--max-iterations <n>]')
+    // Default to ./PLAN.md (what `temper plan` writes) so the plan -> run handoff needs no retyping.
+    const planPath = arg ?? (existsSync(join(process.cwd(), 'PLAN.md')) ? 'PLAN.md' : null)
+    if (!planPath) fail('Usage: temper run <plan.md> [--engine <name>] [--max-iterations <n>], or run with no arg from a dir holding ./PLAN.md.')
     requireCleanRepo() // before the preflight: never scaffold a config into a dirty tree
     preflightOnboarding()
     resolveEngines(cfg, flags.engine)
     if (!resolvesOnPath(commandBinary(cfg.engineCommand))) fail(`engine \`${commandBinary(cfg.engineCommand)}\` is not on your PATH. Install it or fix "engine" in temper.config.json, then run \`temper doctor\`.`)
     applyMaxIterations(cfg, flags)
     log(`engine: ${cfg.engineName}   critic: ${cfg.criticName}\n`)
-    runLoop(cfg, parsePlan(arg))
+    runLoop(cfg, parsePlan(planPath))
   } else if (cmd === 'plan') {
     resolveEngines(cfg, flags.engine)
     log(`drafting engine: ${cfg.criticName} (read-only)\n`)
