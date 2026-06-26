@@ -241,8 +241,11 @@ export function runPlan(cfg, plan, { baseSha }) {
         return { status: 'error', sha: baseSha, iterations: i, seconds: elapsed(runStart), violations: [`held-out command not executable: ${plan.heldout}`] }
       }
       if (h.code !== 0) {
+        const out = stripAnsi(h.out || '').trim()
         log(`\n■ GAMED — work passed every visible gate but FAILED the held-out check \`${plan.heldout}\`.`)
+        if (out) log(out.split('\n').slice(0, 8).map((l) => '    ' + l).join('\n'))
         log('  The agent never saw this check; the visible gates were gamed or insufficient. Nothing committed; review.')
+        log('  → If that output is a command/shell error (not a check failure), your held-out command itself is broken — run it by hand.')
         log('  → `temper explain gamed`')
         log(`⏱ iteration ${i} took ${elapsed(iterStart)}  •  total ${elapsed(runStart)}`)
         return { status: 'gamed', sha: baseSha, iterations: i, seconds: elapsed(runStart), violations: [`held-out check failed: ${plan.heldout}`] }

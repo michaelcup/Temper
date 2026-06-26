@@ -29,6 +29,8 @@ Plan (you approve)
 
 Everything deterministic is code. The **engine** and the **reuse-critic** are
 the only LLM steps. The critic's reliability is measured, not assumed (`npm run critic-check`).
+The optional held-out check is hidden from the engine's *prompt* — but it lives in the plan file, so a
+repo-exploring engine can read it. It catches an honest-but-insufficient gate, not a determined cheater.
 
 ## Run it
 
