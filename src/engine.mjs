@@ -109,8 +109,9 @@ export function enginePrompt(plan, violations) {
   p += 'Writing: do NOT create new docs or markdown files unless a scope path names one — update the '
   p += 'nearest existing file instead. Be terse — cut any line whose removal would not cause a mistake; '
   p += 'no preamble, no restating the task. Match the register of what you edit: user-facing copy is '
-  p += 'confident and minimal (no developer commentary, no "note that…"); comments explain only what '
-  p += 'the code cannot.\n\n'
+  p += 'confident, specific, and minimal — concrete details over generic filler, no developer commentary, '
+  p += 'no "note that…", no decorative emoji or emoji-as-icons, no empty superlatives ("seamlessly", '
+  p += '"elevate", "unlock"). Comments explain only what the code cannot.\n\n'
   p += `# Task\n${plan.body}\n`
   if (violations.length) {
     p += '\n# Your previous attempt was REJECTED. Fix the ROOT CAUSE of each item below.\n'
