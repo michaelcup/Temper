@@ -16,7 +16,7 @@ import { run, log, fail, requireCleanRepo, commandBinary, resolvesOnPath } from 
 import { loadConfig, resolveEngines, applyMaxIterations, applyQueueBudget, hasFallowConfig, projectHasTests, hasPackageEntry, DEFAULTS } from '../src/config.mjs'
 import { parsePlan, runPlanDraft } from '../src/plan.mjs'
 import { runLoop } from '../src/loop.mjs'
-import { runPhases, status } from '../src/phases.mjs'
+import { runPhases, status, planCheck } from '../src/phases.mjs'
 import { runEval } from '../src/eval.mjs'
 
 function parseArgs(argv) {
@@ -296,6 +296,8 @@ function main() {
     runPhases(cfg, arg ?? cfg.phaseDir, { overnight: cmd === 'overnight' || 'overnight' in flags, branch: flags.branch })
   } else if (cmd === 'status') {
     status(cfg)
+  } else if (cmd === 'plan-check') {
+    process.exit(planCheck(arg ?? cfg.phaseDir) ? 1 : 0)
   } else if (cmd === 'init') {
     runInit(flags)
   } else if (cmd === 'explain') {
@@ -318,6 +320,7 @@ function main() {
         '  temper plan "<task>"          draft a Plan from the codebase for you to approve\n' +
         '  temper init [--agents]        scaffold config; --agents wires the Claude Code / Codex skill\n' +
         '  temper status                 summarize the current/last queue from the ledger\n' +
+        '  temper plan-check <dir>       flag queued plans whose scopes claim the same file (run before overnight)\n' +
         '  temper explain <gate>         what a gate/verdict means + how to clear it\n' +
         '  temper doctor                 check prerequisites\n' +
         '  temper eval                   run the golden-task regression suite\n\n' +

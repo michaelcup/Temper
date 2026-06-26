@@ -8,6 +8,7 @@ import { run, log, git, fail, requireCleanRepo, notify, state } from './sh.mjs'
 import { parsePlan, validatePlan } from './plan.mjs'
 import { runPlan } from './loop.mjs'
 import { runDirectionCheck } from './engine.mjs'
+import { detectScopeConflicts } from './conflicts.mjs'
 
 // Shown when a queue has no phase files yet — the missing on-ramp between Mode A and Mode B.
 const PHASE_HINT =
@@ -261,4 +262,28 @@ export function status(cfg) {
   }
   const reportPath = join(dirname(ledgerPath), 'report.md')
   if (existsSync(reportPath)) log(`\n📋 full report: ${reportPath}`)
+}
+
+// `temper plan-check <dir>` — surface scope conflicts in a phase queue BEFORE an overnight run: pairs of
+// Plans whose `scope:` allowlists claim a common file. Deterministic + conservative; these are DECLARED
+// (un-run) overlaps, so they're POTENTIAL clobbers to review, not confirmed verdicts. Returns the count.
+export function planCheck(dir) {
+  const phases = discoverPhases(dir).map((file) => ({ file, plan: parsePlan(file) }))
+  if (!phases.length) fail(`No phase plans (*.md) in ${dir}.\n${PHASE_HINT}`)
+  const { conflicts, broad } = detectScopeConflicts(phases)
+  for (const b of broad) {
+    log(`⚠ ${basename(b.file)}: broad scope (${b.globs.join(', ')}) — narrow it so conflict detection stays useful.`)
+  }
+  if (!conflicts.length) {
+    log(`✓ no scope conflicts across ${phases.length} plan(s).`)
+    return 0
+  }
+  log(`\n⚠ ${conflicts.length} scope overlap(s) — plans that claim a common file:`)
+  for (const c of conflicts) {
+    log(`  • ${basename(c.a)} ↔ ${basename(c.b)}  (${[...new Set(c.globs.flat())].join(', ')})`)
+  }
+  log('\n  These are POTENTIAL conflicts (declared scope overlap), not confirmed — two plans can touch the')
+  log('  same file harmlessly. Review and merge/reorder where they truly contend; the per-phase gates still')
+  log('  catch a real clobber at the failing test.')
+  return conflicts.length
 }

@@ -33,7 +33,7 @@ export const SUPPRESSION_PATTERNS = [
 ]
 
 // --- scope allowlist (glob → regexp) ---
-function globToRegExp(glob) {
+export function globToRegExp(glob) {
   let re = ''
   for (let i = 0; i < glob.length; i++) {
     const c = glob[i]
