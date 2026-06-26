@@ -49,13 +49,24 @@ function setupBranchIsolation(opts, dir, base) {
     fail(`Could not switch to isolation branch ${branch}.`)
   }
   let restored = false
-  process.on('exit', () => {
+  const restore = () => {
     if (restored) return
     restored = true
     run('git reset --hard --quiet HEAD') // drop uncommitted failed-attempt changes…
     run('git clean -fdq') // …and untracked out-of-scope artifacts (gitignored files like .temper/ are kept)
     run(`git checkout --quiet "${base}"`)
-  })
+  }
+  process.on('exit', restore)
+  // Node does NOT run 'exit' handlers when killed by a signal. Without these, a Ctrl-C on a dragging
+  // overnight run — or a dropped SSH/terminal session — would strand HEAD on the isolation branch with the
+  // in-flight phase's dirty tree, breaking the stated "restore base on ANY exit" invariant. The explicit
+  // process.exit re-fires 'exit' but the `restored` flag makes restore() idempotent.
+  for (const sig of ['SIGINT', 'SIGTERM']) {
+    process.on(sig, () => {
+      restore()
+      process.exit(sig === 'SIGINT' ? 130 : 143)
+    })
+  }
   log(`⎇ ${exists ? 'resuming the queue on' : 'isolating the queue on'} ${branch} — ${base} untouched, nothing auto-merged.`)
   return branch
 }
