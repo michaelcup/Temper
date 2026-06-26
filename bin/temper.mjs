@@ -14,7 +14,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { run, log, fail, requireCleanRepo, commandBinary, resolvesOnPath } from '../src/sh.mjs'
 import { loadConfig, resolveEngines, applyMaxIterations, applyQueueBudget, hasFallowConfig, projectHasTests, hasPackageEntry, DEFAULTS } from '../src/config.mjs'
-import { parsePlan, runPlanDraft } from '../src/plan.mjs'
+import { parsePlan, runPlanDraft, writePlanTemplate } from '../src/plan.mjs'
 import { runLoop } from '../src/loop.mjs'
 import { runPhases, status, planCheck, runTasks, addTask } from '../src/phases.mjs'
 import { runEval } from '../src/eval.mjs'
@@ -315,9 +315,13 @@ function main() {
     log(`engine: ${cfg.engineName}   critic: ${cfg.criticName}\n`)
     runLoop(cfg, parsePlan(planPath))
   } else if (cmd === 'plan') {
-    resolveEngines(cfg, flags.engine)
-    log(`drafting engine: ${cfg.criticName} (read-only)\n`)
-    runPlanDraft(cfg, arg, flags.out, 'force' in flags)
+    if ('template' in flags) {
+      writePlanTemplate(flags.out, 'force' in flags) // fast lane: drop the template, no engine round-trip
+    } else {
+      resolveEngines(cfg, flags.engine)
+      log(`drafting engine: ${cfg.criticName} (read-only)\n`)
+      runPlanDraft(cfg, arg, flags.out, 'force' in flags)
+    }
   } else if (cmd === 'tasks') {
     resolveEngines(cfg, flags.engine)
     log(`drafting engine: ${cfg.criticName} (read-only)\n`)
@@ -361,7 +365,7 @@ function main() {
       'Temper — entropy-gated loop runner\n\n' +
         '  temper run <plan.md>          run one approved Plan to a green gate\n' +
         '  temper overnight <dir>        work an ordered queue of Plans unattended — own branch + morning report\n\n' +
-        '  temper plan "<task>"          draft a Plan from the codebase for you to approve\n' +
+        '  temper plan "<task>"          draft a Plan from the codebase to approve (--template drops a blank one, no engine)\n' +
         '  temper tasks <file>           draft a scoped Plan per task line into the queue (add "<task>" to append one)\n' +
         '  temper audit [dir]            scan with fallow + draft dead-code cleanup Plans into .temper/audit\n' +
         '  temper init [--agents]        scaffold config; --agents wires the Claude Code / Codex skill\n' +

@@ -152,6 +152,15 @@ export function draftPlan(cfg, task) {
   return extractPlanDraft(raw)
 }
 
+// Fast lane: drop the PLAN template (no engine) so you can fill in scope + acceptance and `temper run` in a
+// single round-trip when you already know the change, instead of waiting on a full engine draft.
+export function writePlanTemplate(outPath, force) {
+  const out = typeof outPath === 'string' ? outPath : join(process.cwd(), 'PLAN.md')
+  if (existsSync(out) && !force) fail(`${out} already exists. Pass --force to overwrite, or --out <path> to write elsewhere.`)
+  writeFileSync(out, readFileSync(new URL('../templates/PLAN.template.md', import.meta.url), 'utf8'))
+  log(`✓ wrote ${out} from the template. Fill in scope + acceptance + the spec, then run \`temper run${typeof outPath === 'string' ? ` ${out}` : ''}\`.`)
+}
+
 export function runPlanDraft(cfg, task, outPath, force) {
   if (!task) fail('Usage: temper plan "<task description>" [--out <path>] [--force]')
   const out = typeof outPath === 'string' ? outPath : join(process.cwd(), 'PLAN.md')

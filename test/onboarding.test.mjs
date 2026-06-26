@@ -227,6 +227,21 @@ test('temper run on a config-only dirty tree gives the exact commit one-liner (t
   }
 })
 
+test('temper plan --template drops a ready-to-edit PLAN.md with no engine call (fast lane)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'temper-tmpl-'))
+  execFileSync('git', ['init', '-q'], { cwd: dir })
+  try {
+    const r = temper(dir, ['plan', '--template'])
+    assert.equal(r.code, 0, r.out)
+    assert.match(r.out, /from the template/, 'wrote the template (no engine call)')
+    const plan = readFileSync(join(dir, 'PLAN.md'), 'utf8')
+    assert.match(plan, /scope:/, 'has the scope frontmatter')
+    assert.match(plan, /acceptance:/, 'has the acceptance field')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('a rejecting git hook does not produce a false-green commit', () => {
   const dir = mkdtempSync(join(tmpdir(), 'temper-hook-'))
   const g = (a) => execFileSync('git', a, { cwd: dir })
