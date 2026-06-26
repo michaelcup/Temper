@@ -52,7 +52,7 @@ function planFor(g, acc) {
   return (
     head +
     `# Remove unused exports from ${g.path}\n` +
-    `fallow reports these exports in \`${g.path}\` as unreachable from any entry point: ${list}. DELETE each declaration in full (the whole \`export const\` / \`export function\` and its body), not just the \`export\` keyword, so the dead code is gone rather than left behind as an unused local. Also remove anything those declarations alone used (private helpers, imports).\n\n` +
+    `fallow reports these exports in \`${g.path}\` as unreachable from any entry point: ${list}. The EXPORT is unused, but the symbol may still be used inside this file. For each, remove it from the public API by dropping the \`export\` keyword; then, only if the declaration is no longer referenced anywhere in the file, delete it entirely. Do NOT delete a declaration still used inside the file (that would break it).\n\n` +
     "Before removing, VERIFY none is part of this package's public API (consumed outside this repo) or referenced " +
     'dynamically by string. For any that is public API, do not remove it; add this file to the fallow entry config instead.\n' +
     noTest
