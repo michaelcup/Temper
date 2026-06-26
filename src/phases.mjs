@@ -139,6 +139,24 @@ function writeReport(cfg, { dir, branch, base, ledger, phases, outcome, stoppedA
   return reportPath
 }
 
+// Rough UP-FRONT cost estimate for an overnight queue, so you can weigh it against your subscription cap
+// before walking away. A WORST-CASE bound — every phase burning all its iterations and every per-iteration
+// check firing; a typical run is far fewer (most phases commit in 1–2 iterations). The cap is survived
+// either way (the queue sleeps to the reset and resumes). One engine call ≈ one message against your cap.
+function logEstimate(cfg, phaseCount) {
+  const extra = (cfg.criticMode !== 'off' ? 1 : 0) + (cfg.checkCompleteness ? 1 : 0)
+  let iters = phaseCount * cfg.maxIterations
+  if (cfg.maxQueueIterations) iters = Math.min(iters, cfg.maxQueueIterations)
+  const direction = cfg.directionCheck.enabled && cfg.directionCheck.sources.length ? Math.ceil(phaseCount / (cfg.directionCheck.every || 1)) : 0
+  const worst = iters * (1 + extra) + direction
+  const parts = [`${phaseCount} phase(s) × ≤${cfg.maxIterations} iters`]
+  if (extra) parts.push(`× ${1 + extra} (engine${cfg.criticMode !== 'off' ? ' + critic' : ''}${cfg.checkCompleteness ? ' + completeness' : ''})`)
+  if (direction) parts.push(`+ ${direction} direction-check${direction > 1 ? 's' : ''}`)
+  if (cfg.maxQueueIterations) parts.push(`(iters capped at ${cfg.maxQueueIterations})`)
+  log(`≈ up to ${worst} engine calls worst-case — ${parts.join(' ')}.`)
+  log('  Most phases finish in 1–2 iterations, so a typical run is far fewer. A rate-limit cap is survived (sleep + resume).\n')
+}
+
 export function runPhases(cfg, dir, opts = {}) {
   requireCleanRepo()
   if (run(`git check-ignore "${cfg.progressFile}"`).code !== 0) {
@@ -163,6 +181,7 @@ export function runPhases(cfg, dir, opts = {}) {
     for (const c of conflicts) log(`   ${basename(c.a)} ↔ ${basename(c.b)}`)
     log(`  Run \`temper plan-check ${dir} --reconcile\` to review before committing to the night.\n`)
   }
+  logEstimate(cfg, phases.length)
   const ledgerPath = cfg.progressFile
   const ledger = loadLedger(ledgerPath)
   const base = git('rev-parse --abbrev-ref HEAD')
@@ -292,6 +311,7 @@ export function status(cfg) {
 export function planCheck(cfg, dir, reconcile = false) {
   const phases = discoverPhases(dir).map((file) => ({ file, plan: parsePlan(file) }))
   if (!phases.length) fail(`No phase plans (*.md) in ${dir}.\n${PHASE_HINT}`)
+  logEstimate(cfg, phases.length) // a read-only preview of the run's cost, before you commit to the night
   const { conflicts, broad } = detectScopeConflicts(phases)
   for (const b of broad) {
     log(`⚠ ${basename(b.file)}: broad scope (${b.globs.join(', ')}) — narrow it so conflict detection stays useful.`)

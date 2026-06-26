@@ -99,6 +99,22 @@ test('temper plan-check passes (exit 0) when scopes are disjoint', () => {
   }
 })
 
+test('plan-check prints an up-front worst-case cost estimate', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'temper-cost-'))
+  execFileSync('git', ['init', '-q'], { cwd: dir })
+  writeFileSync(join(dir, 'temper.config.json'), JSON.stringify({ maxIterations: 2, criticMode: 'off' }))
+  mkdirSync(join(dir, 'phases'))
+  for (const [n, name, scope] of [['01', 'a', 'src/a.mjs'], ['02', 'b', 'src/b.mjs'], ['03', 'c', 'src/c.mjs']]) {
+    writeFileSync(join(dir, 'phases', `${n}-${name}.md`), `---\nscope:\n  - "${scope}"\nacceptance: "true"\n---\n# ${name}\nx\n`)
+  }
+  try {
+    const r = execFileSync('node', [TEMPER, 'plan-check', 'phases'], { cwd: dir, encoding: 'utf8' })
+    assert.match(r, /up to 6 engine calls/, '3 phases × ≤2 iters × 1 (critic off) = 6')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 function temperIn(cwd, args) {
   try {
     return { code: 0, out: execFileSync('node', [TEMPER, ...args], { cwd, encoding: 'utf8' }) }
