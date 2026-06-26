@@ -1,7 +1,7 @@
 // Plan handling: parse + validate the human-approved Plan, and the Research→Plan drafting step.
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { log, fail, commandBinary, resolvesOnPath } from './sh.mjs'
+import { log, fail, commandBinary, resolvesOnPath, runArgs } from './sh.mjs'
 import { callCli } from './engine.mjs'
 
 // Collapse CRLF/CR to LF so the literal-`\n` plan regexes below match CRLF files too.
@@ -34,6 +34,17 @@ export function parsePlan(path) {
 }
 
 // Rejects an underspecified plan before any work runs (research: a final plan has no open questions).
+// Syntax-check a shell command WITHOUT running it: `sh -n` parses (catching nested/unbalanced quotes — an
+// inline `node -e "…\"…\""` that survived parsePlan's outer-quote strip) but executes nothing — command
+// substitutions are not expanded, so it is safe to run on an engine-drafted string. Returns the last error
+// line, or null if the command parses cleanly. Matches execSync's shell (/bin/sh), so a pass here means the
+// loop's run() can at least parse it.
+function shellSyntaxError(command) {
+  const { code, out } = runArgs('sh', ['-n', '-c', command])
+  if (code === 0) return null
+  return out.trim().split('\n').filter(Boolean).pop() || `sh -n exited ${code}`
+}
+
 export function validatePlan(plan) {
   const markers = ['TBD', '???', 'open question', 'decide later', 'figure out later', 'not sure']
   const lower = plan.body.toLowerCase()
@@ -55,6 +66,16 @@ export function validatePlan(plan) {
   if (bin && /^[\w./-]/.test(bin) && !resolvesOnPath(bin)) {
     fail(`Acceptance command isn't runnable: \`${plan.acceptance}\` (\`${bin}\` is not on your PATH). Fix it — the loop would read this as a failing test and burn iterations.`)
   }
+  // A command whose binary resolves but is MALFORMED (nested/unbalanced quotes — e.g. an inline
+  // `node -e "…\"…\""`) slips past the binary check, then fails at RUN time as a shell syntax error the loop
+  // misreads as a failing test, burning iterations to an escalation. Catch it here, before the night.
+  const accSyntax = shellSyntaxError(plan.acceptance)
+  if (accSyntax) {
+    fail(
+      `Acceptance command has a shell syntax error — it would fail every iteration as a "failing test":\n  ${accSyntax}\n  → \`${plan.acceptance}\`\n` +
+        '  Keep `acceptance` a SIMPLE command (e.g. `node --test`) and put assertions in a TEST FILE listed in `scope:` — an inline `node -e "…"` with nested quotes breaks under /bin/sh.'
+    )
+  }
   // Same guard for the held-out command — a broken one is WORSE: a non-zero exit reads as GAMED, so it
   // would falsely reject correct work as reward-hacking. (A syntax error inside the command still slips
   // past a binary check — the loop now surfaces the held-out's output so that case is self-diagnosing.)
@@ -62,6 +83,10 @@ export function validatePlan(plan) {
     const hbin = commandBinary(plan.heldout)
     if (hbin && /^[\w./-]/.test(hbin) && !resolvesOnPath(hbin)) {
       fail(`Held-out command isn't runnable: \`${plan.heldout}\` (\`${hbin}\` is not on your PATH). Fix it — a broken held-out reads as GAMED and rejects correct work.`)
+    }
+    const heldSyntax = shellSyntaxError(plan.heldout)
+    if (heldSyntax) {
+      fail(`Held-out command has a shell syntax error — a non-zero exit reads as GAMED and would reject correct work:\n  ${heldSyntax}\n  → \`${plan.heldout}\`\n  Prefer a held-out command in a FILE over an inline one with nested quotes.`)
     }
   }
 }
@@ -77,7 +102,7 @@ function planDraftPrompt(task) {
     'FIRST explore this repository (read the relevant files) so the plan is grounded in the real code.\n' +
     'THEN output the Plan and NOTHING ELSE — no preamble or trailing commentary, and do NOT wrap the whole ' +
     'plan in a code fence (short code snippets INSIDE the plan are fine) — in EXACTLY this format:\n\n' +
-    '---\nscope:\n  - "<exact file or narrow glob to touch>"\nacceptance: "<command that exits 0 when the work is correct>"\n---\n' +
+    '---\nscope:\n  - "<exact file or narrow glob to touch>"\nacceptance: "<SIMPLE command that exits 0 when correct, e.g. node --test>"\n---\n' +
     '# <short imperative title>\n\n' +
     '## Context\n<the specific existing code this plan builds on — the files/functions involved and how they ' +
     'CURRENTLY work — and the ASSUMPTIONS this plan rests on: the things that, if wrong, would make the plan ' +
@@ -87,7 +112,8 @@ function planDraftPrompt(task) {
     "## What we're NOT doing\n<explicit out-of-scope boundaries>\n\n" +
     '## Verification\n- Automated: <the acceptance command>\n- Manual: <what the human checks>\n\n' +
     'Rules: list the EXACT files in `scope:` (this is the change boundary — keep it tight); ground the Context ' +
-    'in code you actually read; resolve every decision (no open questions / TBD); prefer extending existing code over adding new files.\n\n' +
+    'in code you actually read; resolve every decision (no open questions / TBD); prefer extending existing code over adding new files. ' +
+    'Keep `acceptance:` a SIMPLE shell command (`node --test`, `npm test`, or the repo test runner) and put real assertions in a TEST FILE listed in `scope:` — NEVER an inline `node -e "…"` with nested quotes (it runs through /bin/sh and breaks).\n\n' +
     `TASK: ${task}\n`
   )
 }

@@ -132,6 +132,31 @@ test('temper run fails fast when the acceptance command binary is not runnable',
   }
 })
 
+test('temper run fails fast when the acceptance command has a shell syntax error (nested quotes)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'temper-accsyn-'))
+  const g = (a) => execFileSync('git', a, { cwd: dir })
+  mkdirSync(join(dir, 'src'))
+  writeFileSync(join(dir, 'src', 'v.mjs'), 'export const V = 0\n')
+  writeFileSync(join(dir, '.fallowrc.json'), '{"entry":["src/**"]}\n')
+  // an inline `node -e "…"` with NESTED escaped quotes — exactly what dogfood #3's drafter produced. parsePlan
+  // strips the OUTER quotes but leaves the inner \" literal, so /bin/sh chokes at run time and the loop misreads
+  // it as a failing test, burning iterations to an escalation. Catch it at validation instead.
+  const acc = 'acceptance: "node -e \\"import {x} from \'./src/v.mjs\'; console.log(\'ok\')\\""'
+  writeFileSync(join(dir, 'PLAN.md'), `---\nscope:\n  - "src/**"\n${acc}\n---\n# t\nx\n`)
+  g(['init', '-q'])
+  g(['config', 'user.email', 'a@b.c'])
+  g(['config', 'user.name', 'a'])
+  g(['add', '-A'])
+  g(['commit', '-qm', 'seed'])
+  try {
+    const r = temper(dir, ['run', 'PLAN.md'])
+    assert.notEqual(r.code, 0, 'a malformed acceptance command stops before the loop')
+    assert.match(r.out, /shell syntax error/, 'flags the broken acceptance at validation, not after escalating')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('a rejecting git hook does not produce a false-green commit', () => {
   const dir = mkdtempSync(join(tmpdir(), 'temper-hook-'))
   const g = (a) => execFileSync('git', a, { cwd: dir })
