@@ -143,6 +143,14 @@ export function runPhases(cfg, dir, opts = {}) {
     validatePlan(plan)
     return { file, plan, fingerprint: createHash('sha256').update(readFileSync(file)).digest('hex').slice(0, 16) }
   })
+  // Surface scope conflicts before the run (non-blocking): two plans claiming a common file risk the second
+  // silently clobbering the first. You may have sequenced them deliberately, so this warns, never stops.
+  const { conflicts } = detectScopeConflicts(phases)
+  if (conflicts.length) {
+    log(`⚠ ${conflicts.length} scope overlap(s) in this queue — plans claiming a common file:`)
+    for (const c of conflicts) log(`   ${basename(c.a)} ↔ ${basename(c.b)}`)
+    log(`  Run \`temper plan-check ${dir} --reconcile\` to review before committing to the night.\n`)
+  }
   const ledgerPath = cfg.progressFile
   const ledger = loadLedger(ledgerPath)
   const base = git('rev-parse --abbrev-ref HEAD')

@@ -23,8 +23,9 @@ function setup(config, phases) {
   writeFileSync(join(dir, '.gitignore'), '.temper/\n')
   writeFileSync(join(dir, 'src', 'v.mjs'), 'export const V = 0\n')
   writeFileSync(join(dir, 'temper.config.json'), JSON.stringify(config, null, 2))
-  phases.forEach(([name, body], i) => {
-    const fm = `---\nscope:\n  - "src/**"\nacceptance: "node --check src/v.mjs"\n---\n# ${name}\n${body}\n`
+  phases.forEach(([name, body, scope], i) => {
+    const sc = (scope ?? ['src/**']).map((s) => `  - "${s}"`).join('\n')
+    const fm = `---\nscope:\n${sc}\nacceptance: "node --check src/v.mjs"\n---\n# ${name}\n${body}\n`
     writeFileSync(join(dir, '.temper', 'phases', `0${i + 1}-${name}.md`), fm)
   })
   g(['init', '-q'])
@@ -74,6 +75,20 @@ test('overnight isolates the queue on temper/<dir>, restores you to the base bra
     assert.equal((log.match(/temper:/g) || []).length, 2, log)
     assert.ok(existsSync(join(dir, '.temper', 'report.md')), 'a report should be written')
     assert.match(readFileSync(join(dir, '.temper', 'report.md'), 'utf8'), /Committed:\*\* 2\/2/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('a queue with two plans claiming the SAME file warns about the conflict before running (non-blocking)', () => {
+  const dir = setup(baseCfg(), [
+    ['one', 'x', ['src/v.mjs']],
+    ['two', 'y', ['src/v.mjs']],
+  ])
+  try {
+    const r = temper(dir, ['run-phases', '.temper/phases', '--engine', 'stub'])
+    assert.match(r.out, /overlap.* in this queue/, 'warns about the same-file conflict before running')
+    assert.equal(r.code, 0, r.out) // non-blocking: both phases still run + commit
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
