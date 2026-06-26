@@ -49,8 +49,8 @@ test('temper audit turns fallow dead-code findings into scoped cleanup Plans (on
   try {
     const r = temper(dir, ['audit'])
     assert.equal(r.code, 0, r.out)
-    assert.match(r.out, /Audit found dead code/, 'reports what it found')
-    assert.match(r.out, /REVIEW and prune/, 'tells the user to review the false-positive-prone list before running')
+    assert.match(r.out, /Audit found 1 unused export\(s\) and 1 unused file\(s\)/, 'reports true totals')
+    assert.match(r.out, /review each before running/, 'tells the user to review the Plans before running')
     const files = plans(dir)
     assert.equal(files.length, 2, 'one Plan per file with dead code')
     const bodies = files.map((f) => read(dir, f))
@@ -61,6 +61,26 @@ test('temper audit turns fallow dead-code findings into scoped cleanup Plans (on
     assert.match(exportPlan, /VERIFY/, 'carries the conservative verify nudge for fallow false positives')
     const filePlan = bodies.find((p) => /Delete unused file/.test(p))
     assert.match(filePlan, /"src\/orphan\.mjs"/, 'the file-delete Plan is scoped to the orphan')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('temper audit separates likely false positives (scripts/examples/etc) from cleanup Plans', () => {
+  const dir = setup({
+    unused_exports: [{ path: 'src/real.mjs', export_name: 'deadReal', is_type_only: false, line: 1 }],
+    unused_files: [{ path: 'scripts/seed-dev.mjs' }, { path: 'examples/demo/app.mjs' }],
+  })
+  try {
+    const r = temper(dir, ['audit'])
+    assert.equal(r.code, 0, r.out)
+    const files = plans(dir)
+    assert.equal(files.length, 1, 'only the regular-source finding becomes a cleanup Plan')
+    assert.match(read(dir, files[0]), /"src\/real\.mjs"/)
+    assert.match(r.out, /Likely false positives/, 'the FP-class findings are surfaced separately')
+    assert.match(r.out, /scripts\/seed-dev\.mjs/)
+    assert.match(r.out, /examples\/demo\/app\.mjs/)
+    assert.doesNotMatch(files.map((f) => read(dir, f)).join('\n'), /seed-dev|examples/, 'no deletion Plan is generated for the FP-class files')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

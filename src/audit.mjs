@@ -17,6 +17,20 @@ const repoTestCommand = (root) => {
 
 const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40)
 
+// Locations fallow conventionally reports as "unused" because a project's entry config rarely lists them:
+// one-off CLI / maintenance scripts, example apps, public/browser assets, service workers, and re-export
+// barrels (a public API surface). These are usually an ENTRY-CONFIG gap, not dead code, so the audit lists
+// them for review instead of proposing deletion. The real fix is adding them to the fallow `entry` list.
+const LIKELY_FP = [
+  /(^|\/)scripts\//,
+  /(^|\/)examples\//,
+  /(^|\/)public\//,
+  /(^|\/)(sw|service-worker)\.[mc]?[jt]sx?$/,
+  /\.worker\.[mc]?[jt]sx?$/,
+  /(^|\/)index\.[mc]?[jt]sx?$/,
+]
+const isLikelyFalsePositive = (path) => LIKELY_FP.some((re) => re.test(path))
+
 // One reviewable Plan per file. Each carries the conservative VERIFY nudge for fallow's known false positive
 // (public API or config-loaded code flagged "unused"): the human prunes those before the loop ever runs.
 function planFor(g, acc) {
@@ -66,36 +80,50 @@ export function runAudit(cfg, dir) {
     fail(`Could not parse fallow's output. Is fallow set up in this repo (a \`.fallowrc.json\`)? Run \`temper init\`.\n${(r.stderr || r.stdout || '').slice(0, 400)}`)
   }
 
+  const rawExports = (report.unused_exports || []).filter((e) => !e.is_type_only) // value exports; type-only is lower-stakes, deferred
+  const rawFiles = report.unused_files || []
   const byFile = new Map()
   const group = (path) => {
     if (!byFile.has(path)) byFile.set(path, { path, exports: [], file: false })
     return byFile.get(path)
   }
-  for (const e of report.unused_exports || []) if (!e.is_type_only) group(e.path).exports.push({ name: e.export_name, line: e.line })
-  for (const f of report.unused_files || []) group(f.path).file = true // a dead file subsumes its exports: one delete covers them
+  for (const e of rawExports) group(e.path).exports.push({ name: e.export_name, line: e.line })
+  for (const f of rawFiles) group(f.path).file = true // a dead file subsumes its exports: one delete covers them
 
   const groups = [...byFile.values()]
   if (!groups.length) {
     log('✓ No dead code found. Nothing to clean.')
     return
   }
-  const kept = groups.slice(0, MAX_GROUPS)
-  const dropped = groups.length - kept.length
+  // Two buckets. High-confidence findings (regular source) become cleanup Plans; conventional false-positive
+  // locations are listed for review and never proposed as deletions, since they are usually an entry-config gap.
+  const real = groups.filter((g) => !isLikelyFalsePositive(g.path))
+  const suspect = groups.filter((g) => isLikelyFalsePositive(g.path))
+  const kept = real.slice(0, MAX_GROUPS)
+  const dropped = real.length - kept.length
   const acc = repoTestCommand(root)
 
-  const outDir = join(root, '.temper', 'audit')
-  mkdirSync(outDir, { recursive: true })
-  for (const n of readdirSync(outDir)) if (/^\d\d-.*\.md$/.test(n)) rmSync(join(outDir, n)) // clear a prior audit; leave anything else
-  kept.forEach((g, i) => {
-    const name = `${String(i + 1).padStart(2, '0')}-${slug(g.file ? `delete-${basename(g.path)}` : `clean-${basename(g.path)}`)}.md`
-    writeFileSync(join(outDir, name), planFor(g, acc))
-  })
+  if (kept.length) {
+    const outDir = join(root, '.temper', 'audit')
+    mkdirSync(outDir, { recursive: true })
+    for (const n of readdirSync(outDir)) if (/^\d\d-.*\.md$/.test(n)) rmSync(join(outDir, n)) // clear a prior audit; leave anything else
+    kept.forEach((g, i) => {
+      const name = `${String(i + 1).padStart(2, '0')}-${slug(g.file ? `delete-${basename(g.path)}` : `clean-${basename(g.path)}`)}.md`
+      writeFileSync(join(outDir, name), planFor(g, acc))
+    })
+  }
 
-  const fileCount = kept.filter((g) => g.file).length
-  const exportCount = kept.reduce((n, g) => n + g.exports.length, 0)
-  log(`\n■ Audit found dead code in ${groups.length} file(s): ${exportCount} unused export(s), ${fileCount} unused file(s).`)
-  log(`  Wrote ${kept.length} cleanup Plan(s) to .temper/audit/${dropped ? ` (the first ${MAX_GROUPS}; ${dropped} more not written, so handle these then re-run \`temper audit\`)` : ''}.`)
+  log(`\n■ Audit found ${rawExports.length} unused export(s) and ${rawFiles.length} unused file(s) across ${groups.length} file(s).`)
+  if (kept.length) {
+    log(`  High-confidence cleanups: wrote ${kept.length} Plan(s) to .temper/audit/${dropped ? ` (of ${real.length}; ${dropped} over the cap, re-run for the rest)` : ''}. Each carries a VERIFY nudge; review each before running.`)
+  } else {
+    log('  No high-confidence cleanups: every finding is in a likely-false-positive location (below).')
+  }
+  if (suspect.length) {
+    log(`  Likely false positives: ${suspect.length} finding(s) in scripts / examples / public / workers / barrels, usually a fallow entry-config gap. Add them to your \`.fallowrc\` entry list rather than deleting:`)
+    for (const g of suspect.slice(0, 12)) log(`    - ${g.path}`)
+    if (suspect.length > 12) log(`    …and ${suspect.length - 12} more`)
+  }
   if (!acc) log('  No test command was detected, so each Plan asks you to set an acceptance command: a removal with no test to catch it is risky.')
-  log('  fallow can flag public API or config-loaded files as "unused" (its known false positive), so REVIEW and prune .temper/audit/ before running.')
-  log('  Then: temper overnight .temper/audit')
+  if (kept.length) log('  Then: temper overnight .temper/audit')
 }
