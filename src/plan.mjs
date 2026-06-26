@@ -100,6 +100,14 @@ export function extractPlanDraft(raw) {
   return kept.join('\n').trimEnd() + '\n'
 }
 
+// Draft a Plan for `task` via the READ-ONLY critic command (explores the repo but cannot edit it, so
+// drafting never mutates the tree), returning the extracted plan text. Shared by `temper plan` (one task)
+// and `temper tasks` (a batch).
+export function draftPlan(cfg, task) {
+  const { out: raw } = callCli(cfg.criticCommand, planDraftPrompt(task), cfg)
+  return extractPlanDraft(raw)
+}
+
 export function runPlanDraft(cfg, task, outPath, force) {
   if (!task) fail('Usage: temper plan "<task description>" [--out <path>] [--force]')
   const out = typeof outPath === 'string' ? outPath : join(process.cwd(), 'PLAN.md')
@@ -107,10 +115,7 @@ export function runPlanDraft(cfg, task, outPath, force) {
     fail(`${out} already exists — pass --force to overwrite, or --out <path> to write elsewhere.`)
   }
   log(`▶ drafting a Plan for: ${task}\n`)
-  // Draft READ-ONLY: the critic command can explore the repo but cannot edit it, so drafting
-  // never mutates the working tree.
-  const { out: raw } = callCli(cfg.criticCommand, planDraftPrompt(task), cfg)
-  const planText = extractPlanDraft(raw)
+  const planText = draftPlan(cfg, task)
   writeFileSync(out, planText)
   log(`✓ draft written to ${out}`)
   // Validate the way the runner will (frontmatter with a scope list) so the check agrees with parsePlan.

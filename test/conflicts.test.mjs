@@ -4,7 +4,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -96,5 +96,34 @@ test('temper plan-check passes (exit 0) when scopes are disjoint', () => {
     assert.match(r.out, /no scope conflicts/)
   } finally {
     rmSync(dirname(dir), { recursive: true, force: true })
+  }
+})
+
+function temperIn(cwd, args) {
+  try {
+    return { code: 0, out: execFileSync('node', [TEMPER, ...args], { cwd, encoding: 'utf8' }) }
+  } catch (e) {
+    return { code: e.status ?? 1, out: `${e.stdout ?? ''}${e.stderr ?? ''}` }
+  }
+}
+
+test('temper tasks drafts a numbered Plan per task line and surfaces conflicts on ingest', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'temper-tasks-'))
+  execFileSync('git', ['init', '-q'], { cwd: dir })
+  // stub critic: ignore the prompt, emit a fixed valid Plan claiming src/x.mjs — so both drafts conflict.
+  const planText = '---\nscope:\n  - "src/x.mjs"\nacceptance: "true"\n---\n# stub plan\nbody\n'
+  const critic = `printf -- '${planText.replace(/\n/g, '\\n')}'`
+  writeFileSync(join(dir, 'temper.config.json'), JSON.stringify({ engines: { stub: { engine: 'true', critic } }, engine: 'stub' }))
+  writeFileSync(join(dir, 'tasks.txt'), '# my tasks\nadd a clamp helper\nadd a slugify helper\n')
+  try {
+    const r = temperIn(dir, ['tasks', 'tasks.txt', '--dir', 'q', '--engine', 'stub'])
+    assert.equal(r.code, 0, r.out)
+    const written = readdirSync(join(dir, 'q')).filter((f) => f.endsWith('.md')).sort()
+    assert.equal(written.length, 2, written.join(','))
+    assert.match(written[0], /^01-add-a-clamp-helper/)
+    assert.match(written[1], /^02-add-a-slugify-helper/)
+    assert.match(r.out, /scope overlap/, 'both stub plans claim src/x.mjs → conflict surfaced on ingest')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
   }
 })

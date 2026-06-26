@@ -5,7 +5,7 @@ import { existsSync, readFileSync, writeFileSync, readdirSync, mkdirSync } from 
 import { join, dirname, resolve, basename } from 'node:path'
 import { createHash } from 'node:crypto'
 import { run, log, git, fail, requireCleanRepo, notify, state } from './sh.mjs'
-import { parsePlan, validatePlan } from './plan.mjs'
+import { parsePlan, validatePlan, draftPlan } from './plan.mjs'
 import { runPlan } from './loop.mjs'
 import { runDirectionCheck } from './engine.mjs'
 import { detectScopeConflicts } from './conflicts.mjs'
@@ -286,4 +286,46 @@ export function planCheck(dir) {
   log('  same file harmlessly. Review and merge/reorder where they truly contend; the per-phase gates still')
   log('  catch a real clobber at the failing test.')
   return conflicts.length
+}
+
+// `temper tasks <file> [--dir <queue>]` — ingest a plain-text list of tasks (one per line; blank lines and
+// `#` comments ignored), draft a numbered, scoped Plan for each into the queue dir (read-only — drafting
+// never edits the repo), and immediately surface any scope conflicts. Composition of two existing
+// primitives: per-line draftPlan + the deterministic detector. Decomposition stays a human job: every
+// drafted Plan is reviewed/approved before `temper overnight`.
+export function runTasks(cfg, taskFile, dir) {
+  if (!taskFile || !existsSync(taskFile)) fail('Usage: temper tasks <file>  (a plain-text list of tasks, one per line)')
+  const tasks = readFileSync(taskFile, 'utf8')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l && !l.startsWith('#'))
+  if (!tasks.length) fail(`No tasks in ${taskFile} (one task per line; blank lines and # comments are ignored).`)
+  mkdirSync(dir, { recursive: true })
+  const existing = readdirSync(dir).filter((f) => f.endsWith('.md'))
+  if (existing.length) fail(`${dir} already holds ${existing.length} plan(s) — clear it or pass a fresh --dir, so drafting can't clobber a queue in progress.`)
+  log(`drafting ${tasks.length} task(s) into ${dir} (read-only; review + approve each before running)…\n`)
+  const phases = []
+  tasks.forEach((task, i) => {
+    const slug = task.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'task'
+    const file = join(dir, `${String(i + 1).padStart(2, '0')}-${slug}.md`)
+    log(`▶ ${i + 1}/${tasks.length}: ${task}`)
+    const planText = draftPlan(cfg, task)
+    writeFileSync(file, planText)
+    const fm = planText.match(/^---\n([\s\S]*?)\n---/)
+    if (fm && /\bscope:/.test(fm[1]) && /^\s*-\s+\S/m.test(fm[1])) {
+      phases.push({ file, plan: parsePlan(file) })
+      log(`  ✓ ${basename(file)}`)
+    } else {
+      log(`  ⚠ ${basename(file)} — draft is missing a scope/frontmatter block; edit it into shape before running.`)
+    }
+  })
+  log(`\n✓ drafted ${phases.length}/${tasks.length} Plan(s) into ${dir}. REVIEW + APPROVE each (scope + spec + acceptance), then \`temper overnight ${dir}\`.`)
+  const { conflicts, broad } = detectScopeConflicts(phases)
+  for (const b of broad) log(`⚠ ${basename(b.file)}: broad scope (${b.globs.join(', ')}) — narrow it.`)
+  if (conflicts.length) {
+    log(`\n⚠ ${conflicts.length} scope overlap(s) to resolve before running:`)
+    for (const c of conflicts) log(`  • ${basename(c.a)} ↔ ${basename(c.b)}  (${[...new Set(c.globs.flat())].join(', ')})`)
+  } else if (phases.length > 1) {
+    log('✓ no scope conflicts across the drafted plans.')
+  }
 }
