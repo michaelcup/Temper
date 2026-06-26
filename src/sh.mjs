@@ -1,5 +1,7 @@
 // Shell, git, logging, and small string primitives — the foundation other modules build on.
 import { execSync, execFileSync } from 'node:child_process'
+import { writeFileSync, readFileSync, rmSync, mkdirSync } from 'node:fs'
+import { join, dirname } from 'node:path'
 
 // Cross-module MUTABLE state, held in one object because ESM can't reassign an imported binding:
 //   logQuiet    — the eval harness silences per-fixture loop chatter
@@ -94,4 +96,35 @@ export function requireCleanRepo() {
   if (git('status --porcelain')) {
     fail('Working tree is dirty. Commit or stash first — Temper needs a clean base to gate against.')
   }
+}
+
+// Single-writer lock — at most ONE temper run mutating a repo at a time. Two runs share one working tree,
+// index, HEAD, and ledger: one run's branch-restore (`git reset --hard` / `git clean`) would destroy the
+// other's in-flight work, and both rewrite the ledger. The lock lives in the GIT DIR (`.git/temper-lock`),
+// never the working tree, so it can't pollute the gates whether or not `.temper/` is gitignored. O_EXCL
+// ('wx'); a lock held by a DEAD pid is stale and taken over (crash-safe, no manual cleanup). Released on exit.
+export function acquireLock() {
+  const gitDir = run('git rev-parse --git-dir').out.trim() || '.git'
+  const lockPath = join(gitDir, 'temper-lock')
+  mkdirSync(dirname(lockPath), { recursive: true })
+  try {
+    writeFileSync(lockPath, String(process.pid), { flag: 'wx' })
+  } catch (e) {
+    if (e.code !== 'EEXIST') throw e
+    const pid = parseInt(String(readFileSync(lockPath, 'utf8')).trim(), 10)
+    let alive = false
+    try {
+      process.kill(pid, 0) // signal 0 = liveness probe, kills nothing
+      alive = true
+    } catch (err) {
+      alive = err.code === 'EPERM' // exists but owned by another user — still alive
+    }
+    if (alive) fail(`Another temper run is active in this repo (pid ${pid}). Wait for it, or delete ${lockPath} if it's stale.`)
+    writeFileSync(lockPath, String(process.pid)) // dead pid ⇒ stale lock, take it over
+  }
+  process.on('exit', () => {
+    try {
+      if (String(readFileSync(lockPath, 'utf8')).trim() === String(process.pid)) rmSync(lockPath)
+    } catch {}
+  })
 }

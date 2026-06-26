@@ -160,6 +160,35 @@ test('a rejecting git hook does not produce a false-green commit', () => {
   }
 })
 
+test('a live lock blocks a second concurrent run; a stale (dead-pid) lock is taken over', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'temper-lock-'))
+  const g = (a) => execFileSync('git', a, { cwd: dir })
+  mkdirSync(join(dir, 'src'))
+  writeFileSync(join(dir, 'src', 'v.mjs'), 'export const V = 0\n')
+  writeFileSync(join(dir, '.fallowrc.json'), '{ "entry": ["src/**"] }\n')
+  writeFileSync(join(dir, '.gitignore'), '.temper/\nPLAN.md\n')
+  writeFileSync(join(dir, 'temper.config.json'), JSON.stringify({ engines: { stub: { engine: APPEND, critic: 'true' } }, engine: 'stub', fallowCommand: 'true', criticMode: 'off' }))
+  writeFileSync(join(dir, 'PLAN.md'), '---\nscope:\n  - "src/**"\nacceptance: "node --check src/v.mjs"\n---\n# t\nx\n')
+  g(['init', '-q'])
+  g(['config', 'user.email', 'a@b.c'])
+  g(['config', 'user.name', 'a'])
+  g(['add', '-A'])
+  g(['commit', '-qm', 'seed'])
+  try {
+    // a LIVE lock (this test's own pid) must block a run — the lock lives in the git dir, never the tree
+    writeFileSync(join(dir, '.git', 'temper-lock'), String(process.pid))
+    const r1 = temper(dir, ['run', 'PLAN.md', '--engine', 'stub', '--max-iterations', '1'])
+    assert.notEqual(r1.code, 0, 'a run must refuse while another holds the lock')
+    assert.match(r1.out, /Another temper run is active/)
+    // a STALE lock (a dead pid) must be taken over so the run proceeds
+    writeFileSync(join(dir, '.git', 'temper-lock'), '999999') // above macOS/Linux max pid → guaranteed dead
+    const r2 = temper(dir, ['run', 'PLAN.md', '--engine', 'stub', '--max-iterations', '1'])
+    assert.equal(r2.code, 0, r2.out)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('temper init writes the full key set (not just a 4-key stub)', () => {
   const dir = mkdtempSync(join(tmpdir(), 'temper-init-'))
   execFileSync('git', ['init', '-q'], { cwd: dir })

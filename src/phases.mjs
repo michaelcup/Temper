@@ -4,7 +4,7 @@
 import { existsSync, readFileSync, writeFileSync, readdirSync, mkdirSync } from 'node:fs'
 import { join, dirname, resolve, basename } from 'node:path'
 import { createHash } from 'node:crypto'
-import { run, log, git, fail, requireCleanRepo, notify, state } from './sh.mjs'
+import { run, log, git, fail, requireCleanRepo, acquireLock, notify, state } from './sh.mjs'
 import { parsePlan, validatePlan, draftPlan } from './plan.mjs'
 import { runPlan } from './loop.mjs'
 import { runDirectionCheck, runReconcile } from './engine.mjs'
@@ -144,6 +144,7 @@ export function runPhases(cfg, dir, opts = {}) {
   if (run(`git check-ignore "${cfg.progressFile}"`).code !== 0) {
     fail(`Add \`.temper/\` to your .gitignore — Temper writes its phase ledger to ${cfg.progressFile} and it must not pollute the gate.`)
   }
+  acquireLock() // single-writer: refuse a second concurrent run mutating this repo
   // Snapshot + validate EVERY phase on the CURRENT (base) branch BEFORE any checkout, so the queue
   // is invariant to what the isolation branch happens to contain, and a parse/validate failure
   // can't strand HEAD on the isolation branch (it fails here, before any branch switch).

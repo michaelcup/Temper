@@ -3,7 +3,7 @@
 import { writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { run, runArgs, log, git, requireCleanRepo, stripAnsi, normalizeFinding, notify, commandBinary, resolvesOnPath } from './sh.mjs'
+import { run, runArgs, log, git, requireCleanRepo, acquireLock, stripAnsi, normalizeFinding, notify, commandBinary, resolvesOnPath } from './sh.mjs'
 import { changedFiles, inScope, protectionViolations, addedSuppressions, fallowUnreachableNewFiles } from './gates.mjs'
 import { callCli, enginePrompt, runCritic, runCompletenessCheck } from './engine.mjs'
 import { validatePlan } from './plan.mjs'
@@ -273,6 +273,7 @@ export function runPlan(cfg, plan, { baseSha }) {
 export function runLoop(cfg, plan) {
   validatePlan(plan)
   requireCleanRepo()
+  acquireLock()
   const v = runPlan(cfg, plan, { baseSha: git('rev-parse HEAD') })
   notify(cfg, v.status, { summary: `temper run "${plan.title}": ${v.status}` })
   if (v.status === 'committed') return
