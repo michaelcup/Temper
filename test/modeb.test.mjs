@@ -144,6 +144,20 @@ test('a passing held-out check is announced in the live log AND confirmed in the
   }
 })
 
+test('a FAILING held-out check rejects the phase as GAMED (exit 5) and commits nothing — the moat', () => {
+  const dir = setup(baseCfg(), [
+    ['one', 'x', ['src/v.mjs'], 'node --check src/v.mjs', 'false'], // visible gates pass; the hidden held-out fails
+  ])
+  try {
+    const r = temper(dir, ['run-phases', '.temper/phases', '--engine', 'stub'])
+    assert.equal(r.code, 5, 'a failed held-out exits 5 (gamed)')
+    assert.match(r.out, /GAMED/, 'the run reports the visible gates were gamed')
+    assert.match(r.out, /Nothing committed/, 'no false-green commit on a gamed phase')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('the morning report flags a declared overlap as NOT confirmed when a phase in it did not commit', () => {
   const dir = setup(baseCfg(), [
     ['one', 'x', ['src/v.mjs']],
