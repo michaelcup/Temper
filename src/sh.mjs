@@ -97,9 +97,18 @@ export function notify(cfg, event, ctx = {}) {
 
 export function requireCleanRepo() {
   if (run('git rev-parse --is-inside-work-tree').code !== 0) fail('Not inside a git repository.')
-  if (git('status --porcelain')) {
-    fail('Working tree is dirty. Commit or stash first — Temper needs a clean base to gate against.')
+  // Use the RAW output, not git() (which .trim()s and so strips the leading space of a ` M` first line,
+  // shifting slice(3) by one). Porcelain is exactly `XY <path>`, so the path is always at index 3.
+  const out = run('git status --porcelain').out
+  if (!out.trim()) return
+  const files = out.split('\n').filter(Boolean).map((l) => l.slice(3).trim()).filter(Boolean)
+  const isConfig = (f) => f === 'temper.config.json' || f.startsWith('.fallowrc') || f === '.gitignore' || f === 'AGENTS.md' || f.startsWith('.claude/')
+  // The init -> run footgun: if the ONLY dirt is Temper's own scaffolded config, say exactly that and the
+  // one-liner to fix it, so the documented first-run flow is not a dead-end blanket "dirty tree" abort.
+  if (files.every(isConfig)) {
+    fail(`Commit Temper's scaffolded config before running (this is the \`temper init\` output):\n  git add ${files.join(' ')} && git commit -m "chore: temper config"`)
   }
+  fail(`Working tree is dirty (${files.length} file(s)). Commit or stash first; Temper needs a clean base to gate against:\n${files.slice(0, 8).map((f) => '  ' + f).join('\n')}${files.length > 8 ? `\n  …and ${files.length - 8} more` : ''}`)
 }
 
 // Single-writer lock — at most ONE temper run mutating a repo at a time. Two runs share one working tree,

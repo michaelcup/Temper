@@ -203,6 +203,30 @@ test('temper run surfaces a failed engine call instead of mislabeling it as no-c
   }
 })
 
+test('temper run on a config-only dirty tree gives the exact commit one-liner (the init->run unblock)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'temper-cfg-'))
+  const g = (a) => execFileSync('git', a, { cwd: dir })
+  mkdirSync(join(dir, 'src'))
+  writeFileSync(join(dir, 'src', 'v.mjs'), 'export const V = 0\n')
+  writeFileSync(join(dir, '.fallowrc.json'), '{"entry":["src/**"]}\n')
+  writeFileSync(join(dir, '.gitignore'), 'PLAN.md\n')
+  writeFileSync(join(dir, 'PLAN.md'), `---\nscope:\n  - "src/**"\nacceptance: "true"\n---\n# t\nx\n`)
+  g(['init', '-q'])
+  g(['config', 'user.email', 'a@b.c'])
+  g(['config', 'user.name', 'a'])
+  g(['add', '-A'])
+  g(['commit', '-qm', 'seed'])
+  writeFileSync(join(dir, 'temper.config.json'), JSON.stringify({ fallowCommand: 'true' })) // now the only dirt
+  try {
+    const r = temper(dir, ['run', 'PLAN.md'])
+    assert.notEqual(r.code, 0, 'still aborts (clean base required)')
+    assert.match(r.out, /Commit Temper's scaffolded config/, 'recognizes the config-only dirty case')
+    assert.match(r.out, /git add .*temper\.config\.json/, 'gives the exact commit command, not a blanket abort')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('a rejecting git hook does not produce a false-green commit', () => {
   const dir = mkdtempSync(join(tmpdir(), 'temper-hook-'))
   const g = (a) => execFileSync('git', a, { cwd: dir })
