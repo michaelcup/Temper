@@ -17,5 +17,5 @@ To add it by hand instead, drop this into `AGENTS.md`:
 >   stopped on.
 
 That's the whole integration: no MCP server, no extra process — the CLI is the portable, cross-client
-surface. Make `temper` available on `PATH` (`npm i -g @michaelcup/temper`, or `npm link` in the Temper
+surface. Make `temper` available on `PATH` (`npm i -g @michaelrowejones/temper`, or `npm link` in the Temper
 repo before publish) so the bare command works.

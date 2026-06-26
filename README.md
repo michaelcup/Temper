@@ -74,7 +74,7 @@ everything.
 
 ```bash
 # one-time: clone, then put `temper` on your PATH
-git clone https://github.com/michaelcup/Temper && cd Temper && npm link
+git clone https://github.com/michaelrowejones/Temper && cd Temper && npm link
 
 # then, from inside the repo you want to work on:
 temper doctor                         # check prerequisites
