@@ -34,15 +34,20 @@ export function parsePlan(path) {
 }
 
 // Rejects an underspecified plan before any work runs (research: a final plan has no open questions).
-// Syntax-check a shell command WITHOUT running it: `sh -n` parses (catching nested/unbalanced quotes — an
-// inline `node -e "…\"…\""` that survived parsePlan's outer-quote strip) but executes nothing — command
-// substitutions are not expanded, so it is safe to run on an engine-drafted string. Returns the last error
-// line, or null if the command parses cleanly. Matches execSync's shell (/bin/sh), so a pass here means the
-// loop's run() can at least parse it.
+// Syntax-check a shell command WITHOUT running it: `-n` parses (catching nested/unbalanced quotes — an inline
+// `node -e "…\"…\""` that survived parsePlan's outer-quote strip) but executes nothing — command
+// substitutions, redirections and globs are all parse-only, so it is safe on an engine-drafted string.
+// Invokes `/bin/sh` by absolute path — the SAME interpreter the loop's run()=execSync uses — so a pass here
+// provably matches what will run it (a `sh` shim earlier on PATH could be a different shell). Best-effort: it
+// reflects THIS host's /bin/sh, so a bashism valid on macOS may still fail on a dash-based Linux runner.
+// Returns the last error line, or null if the command parses cleanly (or the shell couldn't be spawned — a
+// real syntax error always writes to stderr, so empty output means a spawn failure: fail open, don't reject).
 function shellSyntaxError(command) {
-  const { code, out } = runArgs('sh', ['-n', '-c', command])
+  const { code, out } = runArgs('/bin/sh', ['-n', '-c', command])
   if (code === 0) return null
-  return out.trim().split('\n').filter(Boolean).pop() || `sh -n exited ${code}`
+  const msg = out.trim()
+  if (!msg) return null // no stderr ⇒ /bin/sh didn't run (ENOENT/sandbox), not a syntax error — don't false-reject
+  return msg.split('\n').filter(Boolean).pop() || `/bin/sh -n exited ${code}`
 }
 
 export function validatePlan(plan) {

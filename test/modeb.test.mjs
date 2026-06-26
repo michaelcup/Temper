@@ -23,9 +23,9 @@ function setup(config, phases) {
   writeFileSync(join(dir, '.gitignore'), '.temper/\n')
   writeFileSync(join(dir, 'src', 'v.mjs'), 'export const V = 0\n')
   writeFileSync(join(dir, 'temper.config.json'), JSON.stringify(config, null, 2))
-  phases.forEach(([name, body, scope], i) => {
+  phases.forEach(([name, body, scope, acceptance], i) => {
     const sc = (scope ?? ['src/**']).map((s) => `  - "${s}"`).join('\n')
-    const fm = `---\nscope:\n${sc}\nacceptance: "node --check src/v.mjs"\n---\n# ${name}\n${body}\n`
+    const fm = `---\nscope:\n${sc}\nacceptance: "${acceptance ?? 'node --check src/v.mjs'}"\n---\n# ${name}\n${body}\n`
     writeFileSync(join(dir, '.temper', 'phases', `0${i + 1}-${name}.md`), fm)
   })
   g(['init', '-q'])
@@ -103,7 +103,8 @@ test('the morning report confirms an ADDITIVE same-file overlap as harmless, not
     const r = temper(dir, ['run-phases', '.temper/phases', '--engine', 'stub'])
     assert.equal(r.code, 0, r.out)
     const report = readFileSync(join(dir, '.temper', 'report.md'), 'utf8')
-    assert.match(report, /confirmed harmless \(additive/, 'the declared overlap is confirmed benign against actual edits')
+    assert.match(report, /confirmed harmless/, 'the declared overlap is confirmed benign against actual edits')
+    assert.match(report, /additive/, 'the per-pair benign note explains WHY it was harmless (additive)')
     assert.doesNotMatch(report, /\*\*Scope conflicts\*\*/, 'no real conflict surfaced for an additive build')
   } finally {
     rmSync(dir, { recursive: true, force: true })
@@ -122,6 +123,22 @@ test('the morning report FLAGS a real conflict when a later phase rewrites a sha
     const report = readFileSync(join(dir, '.temper', 'report.md'), 'utf8')
     assert.match(report, /\*\*Scope conflicts\*\*/, 'a rewrite of a shared file is a real conflict')
     assert.match(report, /rewrote lines/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('the morning report flags a declared overlap as NOT confirmed when a phase in it did not commit', () => {
+  const dir = setup(baseCfg(), [
+    ['one', 'x', ['src/v.mjs']],
+    ['two', 'y', ['src/v.mjs'], 'false'], // phase 2 escalates: acceptance always fails → never commits
+  ])
+  try {
+    const r = temper(dir, ['run-phases', '.temper/phases', '--engine', 'stub'])
+    assert.notEqual(r.code, 0, 'phase 2 does not commit (escalates/maxes)')
+    const report = readFileSync(join(dir, '.temper', 'report.md'), 'utf8')
+    // the 01↔02 overlap can't be confirmed (phase 2 has no diff) — it must be SURFACED, not silently dropped
+    assert.match(report, /NOT confirmed/, 'an unconfirmable overlap on a failed run is named, not dropped')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

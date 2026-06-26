@@ -221,3 +221,72 @@ test('temper tasks add appends a numbered Plan and classifies overlap by ledger 
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+// confirmConflict edge cases surfaced by the 2026-06-26 adversarial review (root commit, rename, null path).
+test('confirmConflict: a ROOT-commit first phase is handled (empty-tree base), so a clobber on a fresh repo is NOT hidden', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'temper-root-'))
+  const cwd0 = process.cwd()
+  const g = (a) => execFileSync('git', a, { cwd: dir })
+  const w = (c) => writeFileSync(join(dir, 'v.txt'), c)
+  g(['init', '-q'])
+  g(['config', 'user.email', 'a@b.c'])
+  g(['config', 'user.name', 'a'])
+  w('L1\nL2\n') // phase 1 IS the repo's root commit — no seed
+  g(['add', '-A'])
+  g(['commit', '-qm', 'p1'])
+  const sha1 = g(['rev-parse', 'HEAD']).toString().trim()
+  w('L1-REWRITTEN\nL2\n') // phase 2 rewrites phase 1's line 1 (a genuine clobber)
+  g(['commit', '-aqm', 'p2'])
+  const sha2 = g(['rev-parse', 'HEAD']).toString().trim()
+  const ledger = [
+    { file: 'p1', phase: 1, status: 'committed', sha: sha1 },
+    { file: 'p2', phase: 2, status: 'committed', sha: sha2 },
+  ]
+  try {
+    process.chdir(dir)
+    assert.equal(confirmConflict({ a: 'p1', b: 'p2' }, ledger).real, true, 'rewriting the ROOT phase\'s line is real, not "different files"')
+  } finally {
+    process.chdir(cwd0)
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('confirmConflict: a rename+rewrite (git mv) is caught via --no-renames, not hidden as "different files"', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'temper-rn-'))
+  const cwd0 = process.cwd()
+  const g = (a) => execFileSync('git', a, { cwd: dir })
+  g(['init', '-q'])
+  g(['config', 'user.email', 'a@b.c'])
+  g(['config', 'user.name', 'a'])
+  writeFileSync(join(dir, 'seed.txt'), 'seed\n')
+  g(['add', '-A'])
+  g(['commit', '-qm', 'seed'])
+  writeFileSync(join(dir, 'util.txt'), 'A\nB\nC\nD\n') // phase 1 authors util.txt
+  g(['add', '-A'])
+  g(['commit', '-qm', 'p1'])
+  const sha1 = g(['rev-parse', 'HEAD']).toString().trim()
+  g(['mv', 'util.txt', 'helpers.txt']) // phase 2 renames it AND rewrites phase 1's line A
+  writeFileSync(join(dir, 'helpers.txt'), 'A-REWRITTEN\nB\nC\nD\n')
+  g(['add', '-A'])
+  g(['commit', '-qm', 'p2'])
+  const sha2 = g(['rev-parse', 'HEAD']).toString().trim()
+  const ledger = [
+    { file: 'p1', phase: 1, status: 'committed', sha: sha1 },
+    { file: 'p2', phase: 2, status: 'committed', sha: sha2 },
+  ]
+  try {
+    process.chdir(dir)
+    assert.equal(confirmConflict({ a: 'p1', b: 'p2' }, ledger).real, true, 'a rename+rewrite of phase 1\'s file is a real conflict')
+  } finally {
+    process.chdir(cwd0)
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('confirmConflict returns null when a phase in the pair has not committed (so the report flags it unconfirmed)', () => {
+  const ledger = [
+    { file: 'p1', phase: 1, status: 'committed', sha: 'abc' },
+    { file: 'p2', phase: 2, status: 'escalated', sha: null },
+  ]
+  assert.equal(confirmConflict({ a: 'p1', b: 'p2' }, ledger), null, 'an un-committed pair is null (not real, not benign)')
+})

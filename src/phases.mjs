@@ -94,27 +94,37 @@ const mdCell = (s) => String(s).replace(/\r?\n+/g, ' ').replace(/\|/g, '\\|').re
 // of the exact lines the later phase deleted/modified (--unified=0, so no context), were ANY authored by the
 // EARLIER phase's commit? Blame handles non-consecutive phases (it tracks authorship across the phases in
 // between) that a raw line-range can't. Returns {real, note}, or null if a phase hasn't committed. All git
-// calls go through runArgs (no shell — engine-named filenames stay inert). Each phase is one commit, so
-// `<sha>~1..<sha>` is its own diff and `<sha>~1` is the state it edited.
+// calls go through runArgs (no shell — engine-named filenames stay inert). A phase is one commit, so its own
+// diff is <base>..<sha>; baseOf() is the parent EXCEPT a ROOT commit (a fresh-repo first phase) has none, so
+// <sha>~1 is fatal and the empty-tree object stands in. --no-renames pins a `git mv`+rewrite to surface the
+// OLD path (else a rename would hide a clobber as "different files").
+const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904' // git's constant empty-tree sha: the diff base for a root commit
+function baseOf(sha) {
+  return runArgs('git', ['rev-parse', '--verify', '--quiet', `${sha}^`]).code === 0 ? `${sha}~1` : EMPTY_TREE
+}
 export function confirmConflict(conflict, ledger) {
   const ea = ledger.find((e) => e.file === conflict.a)
   const eb = ledger.find((e) => e.file === conflict.b)
   if (!(ea?.status === 'committed' && eb?.status === 'committed')) return null
   const [earlier, later] = ea.phase < eb.phase ? [ea, eb] : [eb, ea]
-  const changed = (e) => runArgs('git', ['diff', '--name-only', `${e.sha}~1`, e.sha]).out.split('\n').filter(Boolean)
+  const changed = (e) => {
+    const r = runArgs('git', ['diff', '--no-renames', '--name-only', baseOf(e.sha), e.sha])
+    return r.code === 0 ? r.out.split('\n').filter(Boolean) : [] // on a git error, never split stderr text into "filenames"
+  }
   const shared = changed(earlier).filter((f) => changed(later).includes(f))
   if (!shared.length) return { real: false, note: 'declared overlap, but they edited different files' }
+  const laterBase = baseOf(later.sha)
   const hits = shared.filter((f) => {
-    // the exact lines the LATER phase deleted/modified in f (no context), in its base (<later.sha>~1) coords
+    // the exact lines the LATER phase deleted/modified in f (no context), in its base coords
     const touched = []
-    for (const m of runArgs('git', ['diff', '--unified=0', `${later.sha}~1`, later.sha, '--', f]).out.matchAll(/^@@ -(\d+)(?:,(\d+))? \+/gm)) {
+    for (const m of runArgs('git', ['diff', '--no-renames', '--unified=0', laterBase, later.sha, '--', f]).out.matchAll(/^@@ -(\d+)(?:,(\d+))? \+/gm)) {
       const count = m[2] === undefined ? 1 : +m[2]
       for (let ln = +m[1]; ln < +m[1] + count; ln++) touched.push(ln) // count 0 (pure addition) ⇒ nothing pushed
     }
     if (!touched.length) return false
     // who authored each line at the later phase's base? (porcelain header: `<40-sha> <orig> <final>` per line)
     const authorOf = new Map()
-    for (const m of runArgs('git', ['blame', '--porcelain', `${later.sha}~1`, '--', f]).out.matchAll(/^([0-9a-f]{40}) \d+ (\d+)/gm)) authorOf.set(+m[2], m[1])
+    for (const m of runArgs('git', ['blame', '--porcelain', laterBase, '--', f]).out.matchAll(/^([0-9a-f]{40}) \d+ (\d+)/gm)) authorOf.set(+m[2], m[1])
     return touched.some((ln) => authorOf.get(ln) === earlier.sha) // did the later phase rewrite a line EARLIER authored?
   })
   if (hits.length) return { real: true, note: `phase ${later.phase} rewrote lines of ${hits.join(', ')} that phase ${earlier.phase} authored — review` }
@@ -172,13 +182,25 @@ function writeReport(cfg, { dir, branch, base, ledger, phases, outcome, stoppedA
   // not cried over.
   if (conflicts?.length) {
     const judged = conflicts.map((c) => ({ c, v: confirmConflict(c, ledger) }))
+    const pair = (x) => `${mdCell(basename(x.c.a))} ↔ ${mdCell(basename(x.c.b))}`
     const real = judged.filter((x) => x.v?.real)
     const benign = judged.filter((x) => x.v && !x.v.real)
+    const unconfirmed = judged.filter((x) => x.v === null) // a pair whose phase didn't commit (a stopped/failed run)
     if (real.length) {
       md += `\n**Scope conflicts** (a later phase rewrote a file an earlier one touched — review before you merge):\n`
-      md += real.map((x) => `- ${mdCell(basename(x.c.a))} ↔ ${mdCell(basename(x.c.b))}: ${mdCell(x.v.note)}`).join('\n') + '\n'
+      md += real.map((x) => `- ${pair(x)}: ${mdCell(x.v.note)}`).join('\n') + '\n'
     }
-    if (benign.length) md += `\n_${benign.length} declared scope overlap(s) confirmed harmless (additive — phases added to a shared file without rewriting each other)._\n`
+    // Surface each benign verdict with its OWN reason (additive vs edited-different-files) rather than one
+    // blanket label — and never silently drop a pair: an unconfirmed overlap (a phase in it didn't commit, so
+    // there's no diff to check) is the conservative case that matters most on a failed run, so name it.
+    if (benign.length) {
+      md += `\n_${benign.length} declared scope overlap(s) confirmed harmless:_\n`
+      md += benign.map((x) => `- ${pair(x)}: ${mdCell(x.v.note)}`).join('\n') + '\n'
+    }
+    if (unconfirmed.length) {
+      md += `\n**Scope overlaps NOT confirmed** (a phase in the pair didn't commit — review manually):\n`
+      md += unconfirmed.map((x) => `- ${pair(x)}`).join('\n') + '\n'
+    }
   }
   if (remaining > 0) md += `\n**Not run:** ${remaining} later phase(s).\n`
   if (isolated) md += `\n**Next:** review \`${branch}\`, then (from ${base}) \`git merge --no-ff ${branch}\` if good.\n`
