@@ -211,12 +211,14 @@ export function runPhases(cfg, dir, opts = {}) {
         direction = d
         log(`⚠ direction concern (${mdCell(d.source)}): ${mdCell(d.concern)}`)
         if (dc.onMiss === 'pause') {
+          // Record the pause IN-MEMORY only (for the morning report below) — do NOT persist a
+          // 'direction-paused' entry to the on-disk ledger for an UN-RUN phase: a crash mid-resume would
+          // leave `temper status` asserting a phase was paused when it's actually being re-run. The earlier
+          // committed phases are already on disk; this phase simply re-runs on resume, no stale entry.
           const pausedEntry = { phase: n + 1, file, title: plan.title, fingerprint, status: 'direction-paused', branch, base, direction }
           const pidx = ledger.findIndex((e) => e.file === file)
           if (pidx >= 0) ledger[pidx] = pausedEntry
           else ledger.push(pausedEntry)
-          mkdirSync(dirname(ledgerPath), { recursive: true })
-          writeFileSync(ledgerPath, JSON.stringify(ledger, null, 2) + '\n')
           outcome = 'direction'
           log(`\n■ paused before phase ${n + 1} (directionCheck.onMiss: pause). Earlier phases are committed; ${phases.length - n} phase(s) not run.`)
           const report = writeReport(cfg, { dir, branch, base, ledger, phases, outcome, stoppedAt: n + 1 })
