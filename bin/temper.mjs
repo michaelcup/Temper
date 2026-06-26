@@ -270,6 +270,13 @@ function explain(gate) {
 
 function main() {
   const { positionals, flags } = parseArgs(process.argv.slice(2))
+  // `--version`/`-v` before any config load, so it works outside a repo. Read package.json relative to THIS
+  // script (not the cwd) — temper runs inside the user's project, where ./package.json is theirs, not ours.
+  if (flags.version || positionals[0] === '-v') {
+    const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
+    console.log(version)
+    process.exit(0)
+  }
   const [cmd, arg] = positionals
   const cfg = loadConfig()
   if (cmd === 'run') {
