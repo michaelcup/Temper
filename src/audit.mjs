@@ -52,7 +52,7 @@ function planFor(g, acc) {
   return (
     head +
     `# Remove unused exports from ${g.path}\n` +
-    `fallow reports these exports in \`${g.path}\` as unreachable from any entry point: ${list}. Remove them, and any code they alone supported.\n\n` +
+    `fallow reports these exports in \`${g.path}\` as unreachable from any entry point: ${list}. DELETE each declaration in full (the whole \`export const\` / \`export function\` and its body), not just the \`export\` keyword, so the dead code is gone rather than left behind as an unused local. Also remove anything those declarations alone used (private helpers, imports).\n\n` +
     "Before removing, VERIFY none is part of this package's public API (consumed outside this repo) or referenced " +
     'dynamically by string. For any that is public API, do not remove it; add this file to the fallow entry config instead.\n' +
     noTest
@@ -125,5 +125,8 @@ export function runAudit(cfg, dir) {
     if (suspect.length > 12) log(`    …and ${suspect.length - 12} more`)
   }
   if (!acc) log('  No test command was detected, so each Plan asks you to set an acceptance command: a removal with no test to catch it is risky.')
+  // Dead code is the verifiable cleanup (delete, gate confirms, entropy drops). Duplication and complexity are
+  // judgment-heavy refactors that fit the gated loop poorly, so the audit points at fallow rather than auto-proposing them.
+  log('  For duplication and complexity, run `fallow dupes` and `fallow health` directly; those are judgment refactors, not the verifiable deletions this audit targets.')
   if (kept.length) log('  Then: temper overnight .temper/audit')
 }

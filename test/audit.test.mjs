@@ -51,6 +51,7 @@ test('temper audit turns fallow dead-code findings into scoped cleanup Plans (on
     assert.equal(r.code, 0, r.out)
     assert.match(r.out, /Audit found 1 unused export\(s\) and 1 unused file\(s\)/, 'reports true totals')
     assert.match(r.out, /review each before running/, 'tells the user to review the Plans before running')
+    assert.match(r.out, /fallow dupes/, 'points at fallow for duplication/complexity rather than auto-proposing risky refactors')
     const files = plans(dir)
     assert.equal(files.length, 2, 'one Plan per file with dead code')
     const bodies = files.map((f) => read(dir, f))
