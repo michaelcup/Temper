@@ -336,12 +336,14 @@ function main() {
         '  temper overnight <dir>        work an ordered queue of Plans unattended — own branch + morning report\n\n' +
         '  temper plan "<task>"          draft a Plan from the codebase for you to approve\n' +
         '  temper tasks <file>           draft a scoped Plan per task line into the queue (add "<task>" to append one)\n' +
+        '  temper audit [dir]            scan with fallow + draft dead-code cleanup Plans into .temper/audit\n' +
         '  temper init [--agents]        scaffold config; --agents wires the Claude Code / Codex skill\n' +
         '  temper status                 summarize the current/last queue from the ledger\n' +
         '  temper plan-check <dir>       flag plans whose scopes claim the same file (--reconcile adds an LLM suggestion)\n' +
         '  temper explain <gate>         what a gate/verdict means + how to clear it\n' +
         '  temper doctor                 check prerequisites\n' +
-        '  temper eval                   run the golden-task regression suite\n\n' +
+        '  temper eval                   run the golden-task regression suite\n' +
+        '  temper --version              print the version\n\n' +
         'Flags: --engine <name>, --max-iterations <n>; overnight adds --branch <b>, --max-queue-seconds/-iterations <n>.\n' +
         'overnight isolates the queue on its own branch (never main, never merged) + writes a report.\n' +
         'Engines live in temper.config.json (presets: claude, codex); set "criticEngine" for cross-model review.\n',
