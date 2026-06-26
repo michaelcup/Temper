@@ -4,7 +4,7 @@
 import { existsSync, readFileSync, writeFileSync, readdirSync, mkdirSync } from 'node:fs'
 import { join, dirname, resolve, basename } from 'node:path'
 import { createHash } from 'node:crypto'
-import { run, log, git, fail, requireCleanRepo, acquireLock, notify, state } from './sh.mjs'
+import { run, runArgs, log, git, fail, requireCleanRepo, acquireLock, notify, state } from './sh.mjs'
 import { parsePlan, validatePlan, draftPlan } from './plan.mjs'
 import { runPlan } from './loop.mjs'
 import { runDirectionCheck, runReconcile } from './engine.mjs'
@@ -88,9 +88,31 @@ const exitCodeFor = (status) => (status === 'halted' ? 2 : status === 'escalated
 // command output) can't break the report table or inject headings/fences. One line, no pipes, no fences.
 const mdCell = (s) => String(s).replace(/\r?\n+/g, ' ').replace(/\|/g, '\\|').replace(/`/g, "'")
 
+// Confirm a DECLARED scope overlap against what the phases ACTUALLY committed. Two phases can claim the
+// same file yet not contend: in a sequential gated queue, a later phase that only ADDS to a shared file (a
+// new helper) built ON the earlier phase's committed result — it didn't clobber it. Returns {real, note}, or
+// null if it can't be confirmed yet (a phase hasn't committed). Each phase is one commit, so `<sha>~1..<sha>`
+// is its own diff; git --numstat's deleted-count > 0 on a shared file ⇒ the later phase rewrote existing
+// lines (a possible clobber), additions-only ⇒ benign. All paths go through runArgs (no shell).
+function confirmConflict(conflict, ledger) {
+  const ea = ledger.find((e) => e.file === conflict.a)
+  const eb = ledger.find((e) => e.file === conflict.b)
+  if (!(ea?.status === 'committed' && eb?.status === 'committed')) return null
+  const [earlier, later] = ea.phase < eb.phase ? [ea, eb] : [eb, ea]
+  const changed = (e) => runArgs('git', ['diff', '--name-only', `${e.sha}~1`, e.sha]).out.split('\n').filter(Boolean)
+  const shared = changed(earlier).filter((f) => changed(later).includes(f))
+  if (!shared.length) return { real: false, note: 'declared overlap, but they edited different files' }
+  const clobbered = shared.filter((f) => {
+    const cols = runArgs('git', ['diff', '--numstat', `${later.sha}~1`, later.sha, '--', f]).out.trim().split('\t')
+    return (parseInt(cols[1], 10) || 0) > 0 // the later phase DELETED/modified existing lines of f
+  })
+  if (clobbered.length) return { real: true, note: `phase ${later.phase} rewrote lines of ${clobbered.join(', ')} that phase ${earlier.phase} touched — review` }
+  return { real: false, note: `phase ${later.phase} only added to ${shared.join(', ')} — additive, no clobber` }
+}
+
 // The morning report (Mode B): synthesized from the ledger so it survives a detached run.
 // Facts only — what committed, what stopped it and why, what's left, where the work is.
-function writeReport(cfg, { dir, branch, base, ledger, phases, outcome, stoppedAt }) {
+function writeReport(cfg, { dir, branch, base, ledger, phases, outcome, stoppedAt, conflicts }) {
   const reportPath = join(dirname(cfg.progressFile), 'report.md')
   mkdirSync(dirname(reportPath), { recursive: true })
   const byFile = new Map(ledger.map((e) => [e.file, e]))
@@ -132,6 +154,20 @@ function writeReport(cfg, { dir, branch, base, ledger, phases, outcome, stoppedA
   if (offTrack.length) {
     md += `\n**Direction concerns** (approach may be on the wrong track — review before you merge):\n`
     md += offTrack.map((e) => `- phase ${e.phase} "${mdCell(e.title)}" (${e.status}, source: ${mdCell(e.direction.source)}): ${mdCell(e.direction.concern)}`).join('\n') + '\n'
+  }
+  // Confirm the queue's DECLARED scope overlaps against the actual commits — surface only the ones where a
+  // later phase rewrote a file an earlier one touched (a possible clobber). Additive overlaps (each phase
+  // adds a different helper to a shared file) are confirmed harmless, so the common build-up pattern is noted,
+  // not cried over.
+  if (conflicts?.length) {
+    const judged = conflicts.map((c) => ({ c, v: confirmConflict(c, ledger) }))
+    const real = judged.filter((x) => x.v?.real)
+    const benign = judged.filter((x) => x.v && !x.v.real)
+    if (real.length) {
+      md += `\n**Scope conflicts** (a later phase rewrote a file an earlier one touched — review before you merge):\n`
+      md += real.map((x) => `- ${mdCell(basename(x.c.a))} ↔ ${mdCell(basename(x.c.b))}: ${mdCell(x.v.note)}`).join('\n') + '\n'
+    }
+    if (benign.length) md += `\n_${benign.length} declared scope overlap(s) confirmed harmless (additive — phases added to a shared file without rewriting each other)._\n`
   }
   if (remaining > 0) md += `\n**Not run:** ${remaining} later phase(s).\n`
   if (isolated) md += `\n**Next:** review \`${branch}\`, then (from ${base}) \`git merge --no-ff ${branch}\` if good.\n`
@@ -177,9 +213,10 @@ export function runPhases(cfg, dir, opts = {}) {
   // silently clobbering the first. You may have sequenced them deliberately, so this warns, never stops.
   const { conflicts } = detectScopeConflicts(phases)
   if (conflicts.length) {
-    log(`⚠ ${conflicts.length} scope overlap(s) in this queue — plans claiming a common file:`)
+    log(`ℹ ${conflicts.length} declared scope overlap(s) — plans whose \`scope:\` lists a common file:`)
     for (const c of conflicts) log(`   ${basename(c.a)} ↔ ${basename(c.b)}`)
-    log(`  Run \`temper plan-check ${dir} --reconcile\` to review before committing to the night.\n`)
+    log(`  Conservative (declared, pre-run). Building up one file across phases is fine — the morning report`)
+    log(`  confirms each against actual edits and flags only a real rewrite. \`plan-check ${dir} --reconcile\` checks intent.\n`)
   }
   logEstimate(cfg, phases.length)
   const ledgerPath = cfg.progressFile
@@ -240,7 +277,7 @@ export function runPhases(cfg, dir, opts = {}) {
           else ledger.push(pausedEntry)
           outcome = 'direction'
           log(`\n■ paused before phase ${n + 1} (directionCheck.onMiss: pause). Earlier phases are committed; ${phases.length - n} phase(s) not run.`)
-          const report = writeReport(cfg, { dir, branch, base, ledger, phases, outcome, stoppedAt: n + 1 })
+          const report = writeReport(cfg, { dir, branch, base, ledger, phases, outcome, stoppedAt: n + 1, conflicts })
           log(`📋 report: ${report}`)
           if (branch !== base) log(`⎇ committed work is on ${branch}; restoring you to ${base}. Review the approach, then resume.`)
           notify(cfg, outcome, { branch, base, report, summary: `temper queue paused at phase ${n + 1} (direction concern)` })
@@ -259,7 +296,7 @@ export function runPhases(cfg, dir, opts = {}) {
     if (v.status !== 'committed') {
       outcome = v.status
       log(`\n■ phase ${n + 1} ${v.status}. Earlier phases are committed; later phases were NOT run. See ${ledgerPath}.`)
-      const report = writeReport(cfg, { dir, branch, base, ledger, phases, outcome, stoppedAt: n + 1 })
+      const report = writeReport(cfg, { dir, branch, base, ledger, phases, outcome, stoppedAt: n + 1, conflicts })
       log(`📋 report: ${report}`)
       if (branch !== base) log(`⎇ committed work is on ${branch}; restoring you to ${base}. Review + merge it yourself.`)
       notify(cfg, outcome, { branch, base, report, summary: `temper queue stopped at phase ${n + 1} (${outcome})` })
@@ -268,7 +305,7 @@ export function runPhases(cfg, dir, opts = {}) {
     baseSha = v.sha
   }
   if (outcome === 'all-green') log(`\n✓ all ${phases.length} phases green. Ledger: ${ledgerPath}`)
-  const report = writeReport(cfg, { dir, branch, base, ledger, phases, outcome, stoppedAt: n })
+  const report = writeReport(cfg, { dir, branch, base, ledger, phases, outcome, stoppedAt: n, conflicts })
   log(`📋 report: ${report}`)
   if (branch !== base) {
     log(`⎇ work is on ${branch}; restoring you to ${base}. Review it, then merge yourself (Temper never merges):\n    git merge --no-ff ${branch}`)

@@ -87,8 +87,41 @@ test('a queue with two plans claiming the SAME file warns about the conflict bef
   ])
   try {
     const r = temper(dir, ['run-phases', '.temper/phases', '--engine', 'stub'])
-    assert.match(r.out, /overlap.* in this queue/, 'warns about the same-file conflict before running')
+    assert.match(r.out, /declared scope overlap/, 'warns about the same-file conflict before running')
     assert.equal(r.code, 0, r.out) // non-blocking: both phases still run + commit
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('the morning report confirms an ADDITIVE same-file overlap as harmless, not a real conflict', () => {
+  const dir = setup(baseCfg(), [
+    ['one', 'x', ['src/v.mjs']],
+    ['two', 'y', ['src/v.mjs']], // both APPEND to src/v.mjs → additive build, no clobber
+  ])
+  try {
+    const r = temper(dir, ['run-phases', '.temper/phases', '--engine', 'stub'])
+    assert.equal(r.code, 0, r.out)
+    const report = readFileSync(join(dir, '.temper', 'report.md'), 'utf8')
+    assert.match(report, /confirmed harmless \(additive/, 'the declared overlap is confirmed benign against actual edits')
+    assert.doesNotMatch(report, /\*\*Scope conflicts\*\*/, 'no real conflict surfaced for an additive build')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('the morning report FLAGS a real conflict when a later phase rewrites a shared file', () => {
+  const OVERWRITE = `sh -c 'echo "export const V = $RANDOM" > src/v.mjs'` // replaces the file → deletes prior lines
+  const dir = setup(baseCfg({ engines: { stub: { engine: OVERWRITE, critic: 'true' } } }), [
+    ['one', 'x', ['src/v.mjs']],
+    ['two', 'y', ['src/v.mjs']],
+  ])
+  try {
+    const r = temper(dir, ['run-phases', '.temper/phases', '--engine', 'stub'])
+    assert.equal(r.code, 0, r.out)
+    const report = readFileSync(join(dir, '.temper', 'report.md'), 'utf8')
+    assert.match(report, /\*\*Scope conflicts\*\*/, 'a rewrite of a shared file is a real conflict')
+    assert.match(report, /rewrote lines/)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
