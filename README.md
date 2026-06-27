@@ -1,6 +1,6 @@
 # Temper
 
-> A green test suite the agent controlled is not evidence. Temper commits only work that survived a check the agent never saw.
+> AI agents are fast, but they leave a mess and ignore the structure you built. Temper puts hard limits on what your coding agent can touch and commits only work that holds up.
 
 **Let your coding agent loop, and commit only what survives the gate.** The work that reaches your
 git history passed a deterministic check: in scope, no dead code, no duplication, your tests green, and a
