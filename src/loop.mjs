@@ -31,7 +31,7 @@ function runGates(cfg, plan, baseSha) {
     flag('no-changes', 'Your previous attempt made no file changes. Implement the task by editing files within scope.')
   } else {
     const outOfScope = changed.filter((f) => !inScope(f, plan.scope))
-    if (outOfScope.length) flag('scope', `Files changed outside the allowed scope: ${outOfScope.join(', ')}. Revert them.`)
+    if (outOfScope.length) flag('scope', `Files changed outside the allowed scope: ${outOfScope.join(', ')}. Revert them. If the task genuinely needs them, do NOT edit them: say which one blocks you, and the human will add it to the Plan's scope.`)
 
     for (const pv of protectionViolations(baseSha, plan, changed)) flag('protected', pv)
 
@@ -132,6 +132,7 @@ function escalateStuck(domain, streak, history, baseSha, runStart, elapsed) {
   log('  This is not converging; it needs your judgment — the plan, the gate, or the task may be wrong.')
   log(`  → \`temper explain ${domain}\` says what this gate checks and how to clear it.`)
   if (domain === 'no-changes') log("  → no edits usually means the engine isn't editing headlessly — run `temper doctor`.")
+  if (domain === 'scope') log("  → the engine kept editing files outside the Plan scope. If they genuinely need the change, add them to the Plan's scope list and re-run.")
   if (domain === 'acceptance') log('  → if the SAME error recurred while the code changed, the acceptance COMMAND is likely wrong (not the code) — run it against the working tree to check.')
   for (const h of history.filter((h) => h.msgs[domain])) {
     log(`   iter ${h.i} (${(h.ms / 1000).toFixed(1)}s): ${h.msgs[domain]}`)
