@@ -81,6 +81,26 @@ test('overnight isolates the queue on temper/<dir>, restores you to the base bra
   }
 })
 
+test('overnight --keep-going skips a phase that cannot pass and finishes the rest of an independent sweep', () => {
+  const dir = setup(baseCfg({ maxIterations: 3 }), [
+    ['one', 'x'],
+    ['two-bad', 'y', ['src/**'], 'false'], // acceptance always fails → this phase escalates
+    ['three', 'z'],
+  ])
+  try {
+    const r = temper(dir, ['overnight', '.temper/phases', '--engine', 'stub', '--keep-going'])
+    assert.equal(r.code, 3, r.out) // partial: the sweep ran to the end with one phase skipped
+    const log = execFileSync('git', ['log', '--oneline', 'temper/phases'], { cwd: dir, encoding: 'utf8' })
+    assert.equal((log.match(/temper:/g) || []).length, 2, 'the two good phases committed; the bad one was skipped\n' + log)
+    assert.match(r.out, /keep-going/, 'logs that it kept going past the failure')
+    const report = readFileSync(join(dir, '.temper', 'report.md'), 'utf8')
+    assert.match(report, /Skipped \(sweep continued\)/, 'the report lists the skipped phase')
+    assert.match(report, /Committed:\*\* 2\/3/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('a queue with two plans claiming the SAME file warns about the conflict before running (non-blocking)', () => {
   const dir = setup(baseCfg(), [
     ['one', 'x', ['src/v.mjs']],

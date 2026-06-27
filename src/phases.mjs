@@ -133,7 +133,7 @@ export function confirmConflict(conflict, ledger) {
 
 // The morning report (Mode B): synthesized from the ledger so it survives a detached run.
 // Facts only — what committed, what stopped it and why, what's left, where the work is.
-function writeReport(cfg, { dir, branch, base, ledger, phases, outcome, stoppedAt, conflicts }) {
+function writeReport(cfg, { dir, branch, base, ledger, phases, outcome, stoppedAt, conflicts, keepGoing }) {
   const reportPath = join(dirname(cfg.progressFile), 'report.md')
   mkdirSync(dirname(reportPath), { recursive: true })
   const byFile = new Map(ledger.map((e) => [e.file, e]))
@@ -161,7 +161,13 @@ function writeReport(cfg, { dir, branch, base, ledger, phases, outcome, stoppedA
   // An overnight user reads this report, not the live log, so without it they can't tell the moat fired at all.
   const heldCount = committed.filter((e) => e.heldout).length
   if (heldCount) md += `**Held-out moat:** ${heldCount} committed phase(s) passed a hidden held-out check.\n`
-  if (stopped) {
+  if (keepGoing) {
+    const skippedEntries = ledger.filter((e) => e.status && e.status !== 'committed')
+    if (skippedEntries.length) {
+      md += `\n**Skipped (sweep continued):** ${skippedEntries.length} phase(s) the gate could not pass — review each before re-running:\n`
+      md += skippedEntries.map((e) => `- phase ${e.phase} "${mdCell(e.title)}"${e.stuckDomain ? ` (${mdCell(e.stuckDomain)})` : ` (${e.status})`}`).join('\n') + '\n'
+    }
+  } else if (stopped) {
     const gate = stopped.stuckDomain ? ` — the \`${mdCell(stopped.stuckDomain)}\` gate` : ''
     md += `\n**Stopped at phase ${stopped.phase}** "${mdCell(stopped.title)}"${gate} (${stopped.status})\n`
     if (Array.isArray(stopped.violations) && stopped.violations.length) md += stopped.violations.map((v) => `- ${mdCell(v)}`).join('\n') + '\n'
@@ -279,6 +285,7 @@ export function runPhases(cfg, dir, opts = {}) {
 
   let baseSha = git('rev-parse HEAD')
   let outcome = 'all-green'
+  let skipped = 0
   let n = 0
   for (; n < phases.length; n++) {
     const { file, plan, fingerprint } = phases[n]
@@ -336,6 +343,16 @@ export function runPhases(cfg, dir, opts = {}) {
     mkdirSync(dirname(ledgerPath), { recursive: true })
     writeFileSync(ledgerPath, JSON.stringify(ledger, null, 2) + '\n')
     if (v.status !== 'committed') {
+      if (opts.keepGoing) {
+        // Independent cleanup sweep: a phase that can't pass (e.g. the engine correctly SKIPPED a fallow
+        // false-positive) must not halt the rest. Record it, drop the failed attempt off the tree, and
+        // continue from the SAME base. Dependent overnight phases keep the default stop-on-fail below.
+        skipped++
+        log(`\n⊘ phase ${n + 1} ${v.status} — keep-going: recorded the skip, continuing the sweep.`)
+        run('git reset --hard --quiet HEAD') // drop the failed attempt
+        run('git clean -fdq') // gitignored .temper/ is kept
+        continue // baseSha unchanged: the next independent phase bases on the last COMMITTED state
+      }
       outcome = v.status
       log(`\n■ phase ${n + 1} ${v.status}. Earlier phases are committed; later phases were NOT run. See ${ledgerPath}.`)
       const report = writeReport(cfg, { dir, branch, base, ledger, phases, outcome, stoppedAt: n + 1, conflicts })
@@ -346,15 +363,18 @@ export function runPhases(cfg, dir, opts = {}) {
     }
     baseSha = v.sha
   }
+  if (skipped) outcome = 'partial'
+  const committedCount = ledger.filter((e) => e.status === 'committed').length
   if (outcome === 'all-green') log(`\n✓ all ${phases.length} phases green. Ledger: ${ledgerPath}`)
-  const report = writeReport(cfg, { dir, branch, base, ledger, phases, outcome, stoppedAt: n, conflicts })
+  else if (outcome === 'partial') log(`\n◑ sweep finished: ${committedCount}/${phases.length} committed, ${skipped} skipped (kept going). Ledger: ${ledgerPath}`)
+  const report = writeReport(cfg, { dir, branch, base, ledger, phases, outcome, stoppedAt: n, conflicts, keepGoing: opts.keepGoing })
   log(`📋 report: ${report}`)
   if (branch !== base) {
     log(`⎇ work is on ${branch}; restoring you to ${base}. Review it, then merge yourself (Temper never merges):\n    git merge --no-ff ${branch}`)
   }
-  const committedCount = ledger.filter((e) => e.status === 'committed').length
   notify(cfg, outcome, { branch, base, report, summary: `temper queue ${outcome}: ${committedCount}/${phases.length} phases committed` })
   if (outcome === 'budget') process.exit(6)
+  if (outcome === 'partial') process.exit(3)
 }
 
 // `temper status` — read the ledger (written per-phase) so a detached/overnight run can be

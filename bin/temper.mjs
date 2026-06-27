@@ -340,7 +340,9 @@ function main() {
     log(`engine: ${cfg.engineName}   critic: ${cfg.criticName}\n`)
     // `temper overnight` defaults the unattended path ON (own branch + morning report — the safe default
     // for a queue you walk away from); the older `run-phases` keeps requiring an explicit --overnight.
-    runPhases(cfg, arg ?? cfg.phaseDir, { overnight: cmd === 'overnight' || 'overnight' in flags, branch: flags.branch })
+    // --keep-going: for an INDEPENDENT sweep (e.g. `temper overnight .temper/audit`), don't let one
+    // phase that can't pass halt the rest — record the skip and continue. Dependent phases omit it.
+    runPhases(cfg, arg ?? cfg.phaseDir, { overnight: cmd === 'overnight' || 'overnight' in flags, branch: flags.branch, keepGoing: 'keep-going' in flags || 'continue-on-fail' in flags })
   } else if (cmd === 'status') {
     status(cfg)
   } else if (cmd === 'plan-check') {
@@ -375,7 +377,7 @@ function main() {
         '  temper doctor                 check prerequisites\n' +
         '  temper eval                   run the golden-task regression suite\n' +
         '  temper --version              print the version\n\n' +
-        'Flags: --engine <name>, --max-iterations <n>; overnight adds --branch <b>, --max-queue-seconds/-iterations <n>.\n' +
+        'Flags: --engine <name>, --max-iterations <n>; overnight adds --branch <b>, --keep-going, --max-queue-seconds/-iterations <n>.\n' +
         'overnight isolates the queue on its own branch (never main, never merged) + writes a report.\n' +
         'Engines live in temper.config.json (presets: claude, codex); set "criticEngine" for cross-model review.\n',
     )

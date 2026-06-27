@@ -31,6 +31,24 @@ const LIKELY_FP = [
 ]
 const isLikelyFalsePositive = (path) => LIKELY_FP.some((re) => re.test(path))
 
+const stripModuleExt = (p) => basename(p).replace(/\.[mc]?[jt]sx?$/, '')
+
+// fallow's static analysis cannot follow string-based dynamic imports (`import('./x')`, `dynamic(() => import('./x'))`)
+// or `require('./x')`, so it false-flags a dynamically-loaded file as "unused". (A real bug this caught on a live repo:
+// a Next.js component fallow reported dead was loaded via `dynamic(() => import('./X'))`.) Collect every dynamic-import /
+// require specifier's basename in ONE pass; a flagged file whose basename appears here is referenced, just not statically.
+function dynamicImportBasenames(root) {
+  const r = runArgs('git', ['-C', root, 'grep', '-hoE', "(import|require)[[:space:]]*\\([[:space:]]*['\"][^'\"]+['\"]"])
+  const set = new Set()
+  if (r.code === 0) {
+    for (const line of (r.stdout || '').split('\n')) {
+      const m = line.match(/['"]([^'"]+)['"]/)
+      if (m) set.add(stripModuleExt(m[1]))
+    }
+  }
+  return set
+}
+
 // One reviewable Plan per file. Each carries the conservative VERIFY nudge for fallow's known false positive
 // (public API or config-loaded code flagged "unused"): the human prunes those before the loop ever runs.
 function planFor(g, acc) {
@@ -97,8 +115,10 @@ export function runAudit(cfg, dir) {
   }
   // Two buckets. High-confidence findings (regular source) become cleanup Plans; conventional false-positive
   // locations are listed for review and never proposed as deletions, since they are usually an entry-config gap.
-  const real = groups.filter((g) => !isLikelyFalsePositive(g.path))
-  const suspect = groups.filter((g) => isLikelyFalsePositive(g.path))
+  const dynBases = dynamicImportBasenames(root)
+  const isFP = (g) => isLikelyFalsePositive(g.path) || dynBases.has(stripModuleExt(g.path))
+  const real = groups.filter((g) => !isFP(g))
+  const suspect = groups.filter((g) => isFP(g))
   const kept = real.slice(0, MAX_GROUPS)
   const dropped = real.length - kept.length
   const acc = repoTestCommand(root)
@@ -120,7 +140,7 @@ export function runAudit(cfg, dir) {
     log('  No high-confidence cleanups: every finding is in a likely-false-positive location (below).')
   }
   if (suspect.length) {
-    log(`  Likely false positives: ${suspect.length} finding(s) in scripts / examples / public / workers / barrels, usually a fallow entry-config gap. Add them to your \`.fallowrc\` entry list rather than deleting:`)
+    log(`  Likely false positives: ${suspect.length} finding(s) in scripts / examples / public / workers / barrels, or dynamically imported (import()/require by string), which fallow's static analysis cannot see. Add them to your \`.fallowrc\` entry list rather than deleting:`)
     for (const g of suspect.slice(0, 12)) log(`    - ${g.path}`)
     if (suspect.length > 12) log(`    …and ${suspect.length - 12} more`)
   }
@@ -128,5 +148,5 @@ export function runAudit(cfg, dir) {
   // Dead code is the verifiable cleanup (delete, gate confirms, entropy drops). Duplication and complexity are
   // judgment-heavy refactors that fit the gated loop poorly, so the audit points at fallow rather than auto-proposing them.
   log('  For duplication and complexity, run `fallow dupes` and `fallow health` directly; those are judgment refactors, not the verifiable deletions this audit targets.')
-  if (kept.length) log('  Then: temper overnight .temper/audit')
+  if (kept.length) log('  Then: temper overnight .temper/audit --keep-going  (independent cleanups; one skip will not halt the rest)')
 }

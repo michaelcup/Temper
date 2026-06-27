@@ -18,10 +18,14 @@ const temper = (dir, args) => {
   }
 }
 
-function setup(fixture, { withTest = true, fallowCommand } = {}) {
+function setup(fixture, { withTest = true, fallowCommand, extraFiles = {} } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'temper-audit-'))
   mkdirSync(join(dir, 'src'))
   writeFileSync(join(dir, 'src', 'a.mjs'), 'export const x = 1\n')
+  for (const [rel, body] of Object.entries(extraFiles)) {
+    mkdirSync(dirname(join(dir, rel)), { recursive: true })
+    writeFileSync(join(dir, rel), body)
+  }
   writeFileSync(join(dir, '.gitignore'), '.temper/\n')
   // fake fallow: prints the fixture as JSON, ignores the dead-code args (like `fallow dead-code --format json`)
   const stub = join(dir, 'fake-fallow.mjs')
@@ -82,6 +86,24 @@ test('temper audit separates likely false positives (scripts/examples/etc) from 
     assert.match(r.out, /scripts\/seed-dev\.mjs/)
     assert.match(r.out, /examples\/demo\/app\.mjs/)
     assert.doesNotMatch(files.map((f) => read(dir, f)).join('\n'), /seed-dev|examples/, 'no deletion Plan is generated for the FP-class files')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('temper audit quarantines a dynamically-imported file (fallow false-positive) instead of proposing its deletion', () => {
+  const dir = setup(
+    { unused_exports: [], unused_files: [{ path: 'src/Widget.mjs' }] },
+    { extraFiles: { 'src/Widget.mjs': 'export const Widget = () => null\n', 'src/host.mjs': "export const w = () => import('./Widget')\n" } },
+  )
+  try {
+    const r = temper(dir, ['audit'])
+    assert.equal(r.code, 0, r.out)
+    // fallow flagged Widget.mjs as unused, but it is loaded via import('./Widget'); deleting it would break the dynamic import.
+    assert.match(r.out, /Likely false positives/, 'the dynamic-import target is surfaced as a likely FP, not a cleanup Plan')
+    assert.match(r.out, /dynamically imported/, 'the message explains the dynamic-import reason')
+    const proposed = (existsSync(join(dir, '.temper', 'audit')) ? plans(dir) : []).map((f) => read(dir, f)).join('\n')
+    assert.doesNotMatch(proposed, /Widget/, 'no deletion Plan is generated for the dynamically-imported file')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

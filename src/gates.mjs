@@ -109,7 +109,9 @@ export function protectionViolations(baseSha, plan, changed) {
 export function changedFiles(baseSha) {
   const tracked = run(`git diff --name-only ${baseSha}`).out.split('\n').filter(Boolean)
   const untracked = run('git ls-files --others --exclude-standard').out.split('\n').filter(Boolean)
-  return [...new Set([...tracked, ...untracked])]
+  // Temper's own runtime dir (.temper/: ledger, audit plans, reports) is not the engine's work product.
+  // Exclude it so Temper's own writes can never trip the scope gate, even if .temper/ was accidentally committed.
+  return [...new Set([...tracked, ...untracked])].filter((f) => f !== '.temper' && !f.startsWith('.temper/'))
 }
 
 // fallow's dead-code gate flags a NEW file as unused / "not reachable from any entry point" — the
