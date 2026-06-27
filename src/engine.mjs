@@ -112,7 +112,9 @@ export function enginePrompt(plan, violations) {
   p += 'confident, specific, and minimal, with concrete details over generic filler, no developer commentary, '
   p += 'no "note that…", no decorative emoji or emoji-as-icons, no empty superlatives ("seamlessly", '
   p += '"elevate", "unlock"). Write plain declarative sentences: no em-dash asides, no rhetorical questions, '
-  p += 'no fragments standing in for sentences. Comments explain only what the code cannot.\n\n'
+  p += 'no sentence fragments, no glib antithesis ("X, not Y" / "stop X, do Y"), no swagger or social proof, '
+  p += 'no tired metaphors, no commands aimed at the reader; persuade with the concrete reason, not a flourish. '
+  p += 'Comments explain only what the code cannot.\n\n'
   p += `# Task\n${plan.body}\n`
   if (violations.length) {
     p += '\n# Your previous attempt was REJECTED. Fix the ROOT CAUSE of each item below.\n'
