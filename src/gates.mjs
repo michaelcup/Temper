@@ -114,6 +114,21 @@ export function changedFiles(baseSha) {
   return [...new Set([...tracked, ...untracked])].filter((f) => f !== '.temper' && !f.startsWith('.temper/'))
 }
 
+// Removal-completeness: literal identifiers/paths a Plan declared as removed must not survive. For each term,
+// `git grep -F -l --untracked -e <term> -- <roots>` (FIXED string — no regex, no shell; searches tracked +
+// untracked working-tree files, honoring .gitignore so node_modules/.temper/PLAN.md are skipped). Returns
+// [{ term, files }] for each term that still has a hit.
+export function survivingReferences(terms, roots) {
+  const out = []
+  for (const term of terms) {
+    if (!term) continue
+    const r = runArgs('git', ['grep', '-F', '-l', '--untracked', '-e', term, '--', ...roots])
+    const files = r.code === 0 ? r.out.split('\n').filter(Boolean).sort() : []
+    if (files.length) out.push({ term, files })
+  }
+  return out
+}
+
 // fallow's dead-code gate flags a NEW file as unused / "not reachable from any entry point" — the
 // classic dynamic-load FALSE-POSITIVE: a fixture, plugin, or dynamic-import / require-by-string target
 // that IS used, just not via a static import fallow can follow. Returns the newly-added (untracked)

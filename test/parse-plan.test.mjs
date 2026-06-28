@@ -46,3 +46,35 @@ test('parsePlan tolerates CRLF line endings', () => {
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('parsePlan reads removes: and removesRoot: as literal-term lists, defaulting to []', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'temper-removes-'))
+  try {
+    const withR = ['---', 'scope:', '  - "src/x.mjs"', 'acceptance: "node --test"', 'removes:', '  - "external_site.agent_handoff.create"', '  - "/admin/site/anpa-external-workflows"', 'removesRoot:', '  - "src"', '  - "docs"', '---', '# Title'].join('\n')
+    const p1 = join(dir, 'r.md')
+    writeFileSync(p1, withR)
+    const a = parsePlan(p1)
+    assert.deepEqual(a.removes, ['external_site.agent_handoff.create', '/admin/site/anpa-external-workflows'])
+    assert.deepEqual(a.removesRoot, ['src', 'docs'])
+    const p2 = join(dir, 'n.md')
+    writeFileSync(p2, FM)
+    const b = parsePlan(p2)
+    assert.deepEqual(b.removes, [], 'removes defaults to empty when absent')
+    assert.deepEqual(b.removesRoot, [])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('parsePlan unquotes single quotes and preserves inner quotes (quote-aware unquote)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'temper-unquote-'))
+  try {
+    // A single-quoted acceptance wrapping a grep pattern with inner double-quotes and a | (the Stage-E case).
+    const plan = ['---', 'scope:', '  - "src/x.mjs"', `acceptance: 'node --test && ! grep -Eq "a|b" src'`, '---', '# Title'].join('\n')
+    const p = join(dir, 'q.md')
+    writeFileSync(p, plan)
+    assert.equal(parsePlan(p).acceptance, 'node --test && ! grep -Eq "a|b" src', 'outer single-quotes stripped, inner double-quotes kept')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

@@ -4,13 +4,13 @@ import { writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { run, runArgs, log, git, requireCleanRepo, acquireLock, stripAnsi, normalizeFinding, notify, commandBinary, resolvesOnPath } from './sh.mjs'
-import { changedFiles, inScope, protectionViolations, addedSuppressions, fallowUnreachableNewFiles } from './gates.mjs'
+import { changedFiles, inScope, protectionViolations, addedSuppressions, fallowUnreachableNewFiles, survivingReferences } from './gates.mjs'
 import { callCli, enginePrompt, runCritic, runCompletenessCheck } from './engine.mjs'
 import { validatePlan } from './plan.mjs'
 
 // The stable failure categories a re-prompt loop can get stuck on (R2). The category,
 // not the (drifting) message text, is the signal that the loop is not converging.
-const ALL_DOMAINS = ['no-changes', 'scope', 'protected', 'fallow-audit', 'suppression', 'acceptance', 'completeness']
+const ALL_DOMAINS = ['no-changes', 'scope', 'protected', 'fallow-audit', 'suppression', 'acceptance', 'removal', 'completeness']
 
 // Run the deterministic gates against the working tree, in cheapest-first order. Returns the
 // violation messages plus, per failure-domain, the head message (for telemetry) and a NORMALIZED
@@ -58,6 +58,16 @@ function runGates(cfg, plan, baseSha) {
       log(`• acceptance: ${plan.acceptance}`)
       const a = run(plan.acceptance)
       if (a.code !== 0) flag('acceptance', `Acceptance check failed (\`${plan.acceptance}\`):\n${stripAnsi(a.out).trim().slice(-1500)}`)
+    }
+
+    // Removal-completeness gate: literal identifiers/paths the Plan declared as `removes:` must not survive
+    // anywhere (the deletion-side mirror of scope). A cheap, deterministic git-grep that catches the string
+    // references in contracts/specs/docs that typecheck and tests cannot see.
+    if (plan.removes.length) {
+      const leftovers = survivingReferences(plan.removes, plan.removesRoot.length ? plan.removesRoot : ['.'])
+      if (leftovers.length) {
+        flag('removal', `These identifiers were declared removed (\`removes:\`) but still appear — delete every reference:\n${leftovers.map((l) => `  • "${l.term}" in ${l.files.join(', ')}`).join('\n')}`)
+      }
     }
 
     // Diff-vs-Plan completeness — only when the cheap gates already passed (don't waste a model call).

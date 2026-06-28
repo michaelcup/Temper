@@ -7,6 +7,15 @@ scope:
 # Automated verification: a command that must exit 0 for the work to be accepted.
 # (Manual / human verification — UI, UX, performance — goes in the body below.)
 acceptance: "npm test -- thing"
+# Optional removal-completeness gate: literal identifiers / op-ids / paths that must NOT survive anywhere
+# after this change (the deletion-side mirror of scope). A green gate proves none remain, checked with
+# `git grep -F` (fixed strings — no regex, no shell). Caveat: matching is substring, so pick distinctive terms.
+# removes:
+#   - "external_site.agent_handoff.create"
+#   - "/admin/site/anpa-external-workflows"
+# removesRoot:  # optional; narrows where to search (default: the whole repo)
+#   - "src"
+#   - "docs"
 # Optional held-out check: run ONLY after every visible gate passes, and never shown
 # to the engine. If the work passes the visible gates but fails this, it's treated as
 # gaming: rejected and escalated. Use a check distinct from `acceptance`.

@@ -7,27 +7,41 @@ import { callCli } from './engine.mjs'
 // Collapse CRLF/CR to LF so the literal-`\n` plan regexes below match CRLF files too.
 const normalizeNewlines = (s) => s.replace(/\r\n?/g, '\n')
 
+// Strip ONE surrounding quote pair, but only when the first and last char are the SAME quote (length >= 2).
+// The old positional /^["']|["']$/ stripped a lone leading-or-trailing quote and mismatched a "…' pair —
+// the parser-side analogue of the quote-aware commandBinary fix.
+const unquote = (s) => (s.length >= 2 && (s[0] === '"' || s[0] === "'") && s[s.length - 1] === s[0] ? s.slice(1, -1) : s)
+
 export function parsePlan(path) {
   if (!existsSync(path)) fail(`Plan not found: ${path}`)
   const raw = normalizeNewlines(readFileSync(path, 'utf8'))
   const m = raw.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/)
   if (!m) fail('Plan must start with a `---` frontmatter block — see templates/PLAN.template.md.')
   const [, front, body] = m
-  // ONLY the bullets directly under the `scope:` key are the allowlist (the primary containment boundary).
+  // Read ONLY the bullets directly under a given key (the scope allowlist is the primary containment boundary).
   // Reading every `- ` in the frontmatter let a stray bullet under another key (reviewers:, tags:, notes:) —
   // or a sneaked `- "**"` in an engine-drafted, skim-reviewed plan — silently widen scope to the whole repo.
-  const scopeBlock = front.match(/^scope:[ \t]*\n((?:[ \t]+-[ \t]+.+\n?)+)/m)
-  const scope = scopeBlock ? [...scopeBlock[1].matchAll(/^[ \t]+-[ \t]+(.+)$/gm)].map((x) => x[1].trim().replace(/^["']|["']$/g, '')) : []
+  const listBlock = (key) => {
+    const b = front.match(new RegExp(`^${key}:[ \\t]*\\n((?:[ \\t]+-[ \\t]+.+\\n?)+)`, 'm'))
+    return b ? [...b[1].matchAll(/^[ \t]+-[ \t]+(.+)$/gm)].map((x) => unquote(x[1].trim())) : []
+  }
+  const scope = listBlock('scope')
+  // `removes:` — literal identifiers/paths that must NOT survive anywhere after this change (the deletion-side
+  // mirror of scope). `removesRoot:` optionally narrows where to search (default: the whole repo).
+  const removes = listBlock('removes')
+  const removesRoot = listBlock('removesRoot')
   const acc = front.match(/^acceptance:\s*(.+)$/m)
   const held = front.match(/^heldout:\s*(.+)$/m)
   const title = body.match(/^#\s+(.+)$/m)
   if (!scope.length) fail('Plan frontmatter must list at least one scope glob under `scope:`.')
   return {
     scope,
-    acceptance: acc ? acc[1].trim().replace(/^["']|["']$/g, '') : null,
+    removes,
+    removesRoot,
+    acceptance: acc ? unquote(acc[1].trim()) : null,
     // A hidden check the engine never sees — run only after every visible gate passes,
     // to catch work that satisfied the visible checks without satisfying the spec.
-    heldout: held ? held[1].trim().replace(/^["']|["']$/g, '') : null,
+    heldout: held ? unquote(held[1].trim()) : null,
     title: title ? title[1].trim() : 'temper change',
     body: body.trim(),
   }
