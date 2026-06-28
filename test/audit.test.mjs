@@ -154,6 +154,43 @@ test('temper audit warns and asks for an acceptance command when the repo has no
   }
 })
 
+test('temper audit --json prints machine-readable findings and writes no Plans', () => {
+  const dir = setup({
+    unused_exports: [{ path: 'src/real.mjs', export_name: 'deadReal', is_type_only: false, line: 1 }],
+    unused_files: [{ path: 'scripts/seed-dev.mjs' }],
+  })
+  try {
+    const r = temper(dir, ['audit', '--json'])
+    assert.equal(r.code, 0, r.out)
+    const out = JSON.parse(r.out)
+    assert.equal(out.unused_exports, 1)
+    assert.equal(out.unused_files, 1)
+    assert.equal(out.files_with_findings, 2)
+    assert.deepEqual(out.high_confidence_cleanups, [{ path: 'src/real.mjs', exports: ['deadReal'] }])
+    assert.deepEqual(out.likely_false_positives, [{ path: 'scripts/seed-dev.mjs' }])
+    assert.ok(!existsSync(join(dir, '.temper', 'audit')) || plans(dir).length === 0, 'writes no Plans')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('temper audit --json on a clean codebase prints valid empty JSON, not the log line', () => {
+  const dir = setup({ unused_exports: [], unused_files: [] })
+  try {
+    const r = temper(dir, ['audit', '--json'])
+    assert.equal(r.code, 0, r.out)
+    const out = JSON.parse(r.out)
+    assert.equal(out.unused_exports, 0)
+    assert.equal(out.unused_files, 0)
+    assert.equal(out.files_with_findings, 0)
+    assert.deepEqual(out.high_confidence_cleanups, [])
+    assert.deepEqual(out.likely_false_positives, [])
+    assert.doesNotMatch(r.out, /No dead code found/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('temper audit fails clearly when fallow is not installed', () => {
   const dir = setup({ unused_exports: [], unused_files: [] }, { fallowCommand: 'definitely_not_fallow_zzz' })
   try {

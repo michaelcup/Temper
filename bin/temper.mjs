@@ -349,7 +349,7 @@ function main() {
     else runTasks(cfg, arg, queueDir)
   } else if (cmd === 'audit') {
     const limit = 'all' in flags ? 0 : 'limit' in flags ? Math.max(0, parseInt(flags.limit, 10) || 0) : undefined
-    runAudit(cfg, arg, limit === undefined ? {} : { limit })
+    runAudit(cfg, arg, { ...(limit === undefined ? {} : { limit }), json: 'json' in flags })
   } else if (cmd === 'overnight' || cmd === 'run-phases') {
     preflightRun(cfg, flags)
     applyQueueBudget(cfg, flags)
@@ -385,7 +385,7 @@ function main() {
         '  temper overnight <dir>        work an ordered queue of Plans unattended — own branch + morning report\n\n' +
         '  temper plan "<task>"          draft a Plan from the codebase to approve (--template drops a blank one, no engine)\n' +
         '  temper tasks <file>           draft a scoped Plan per task line into the queue (add "<task>" to append one)\n' +
-        '  temper audit [dir]            scan with fallow + draft dead-code cleanup Plans into .temper/audit\n' +
+        '  temper audit [dir]            scan with fallow + draft dead-code cleanup Plans into .temper/audit (--json prints findings, writes no Plans)\n' +
         '  temper init [--agents]        scaffold config; --agents wires the Claude Code / Codex skill\n' +
         '  temper status                 summarize the current/last queue from the ledger\n' +
         '  temper plan-check <dir>       flag plans whose scopes claim the same file (--reconcile adds an LLM suggestion)\n' +

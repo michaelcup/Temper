@@ -80,7 +80,7 @@ function planFor(g, acc) {
 // Turn fallow's full dead-code report into reviewable, scoped cleanup Plans. A THIN bridge: fallow finds the
 // entropy, the human approves the list, the gated loop removes it safely. v1 covers dead code (unused exports
 // and unused files), the clearest and most verifiable cleanup. It PROPOSES and never runs the cleanup itself.
-export function runAudit(cfg, dir, { limit = MAX_GROUPS } = {}) {
+export function runAudit(cfg, dir, { limit = MAX_GROUPS, json = false } = {}) {
   const root = dir && dir !== '.' ? dir : process.cwd()
   if (!cfg.fallowCommand) {
     fail('`temper audit` needs fallow for JS/TS dead-code analysis. Install it (`npm i -g fallow`), then `temper init` (or `fallow init`) to add an entry-aware config.')
@@ -109,7 +109,7 @@ export function runAudit(cfg, dir, { limit = MAX_GROUPS } = {}) {
   for (const f of rawFiles) group(f.path).file = true // a dead file subsumes its exports: one delete covers them
 
   const groups = [...byFile.values()]
-  if (!groups.length) {
+  if (!groups.length && !json) {
     log('✓ No dead code found. Nothing to clean.')
     return
   }
@@ -119,6 +119,20 @@ export function runAudit(cfg, dir, { limit = MAX_GROUPS } = {}) {
   const isFP = (g) => isLikelyFalsePositive(g.path) || dynBases.has(stripModuleExt(g.path))
   const real = groups.filter((g) => !isFP(g))
   const suspect = groups.filter((g) => isFP(g))
+
+  if (json) {
+    // Machine-readable findings for CI/scripts: no Plan files, no human summary. The high-confidence bucket
+    // carries each path with its exports or a file flag; the suspect bucket carries paths only.
+    process.stdout.write(JSON.stringify({
+      unused_exports: rawExports.length,
+      unused_files: rawFiles.length,
+      files_with_findings: groups.length,
+      high_confidence_cleanups: real.map((g) => (g.file ? { path: g.path, file: true } : { path: g.path, exports: g.exports.map((e) => e.name) })),
+      likely_false_positives: suspect.map((g) => ({ path: g.path })),
+    }) + '\n')
+    return
+  }
+
   const kept = limit > 0 ? real.slice(0, limit) : real // limit 0 (e.g. `--all`): no cap, one Plan per finding
   const dropped = real.length - kept.length
   const acc = repoTestCommand(root)
