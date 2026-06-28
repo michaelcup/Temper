@@ -163,7 +163,10 @@ export function runPlan(cfg, plan, { baseSha }) {
   // on a "command not found". Detected once, reused across phases. The eval's stub command resolves, so
   // fixtures still exercise the gate.
   if (cfg.entropyGateEnabled === undefined) {
-    cfg.entropyCommand = cfg.entropyGate || `${cfg.fallowCommand} audit --gate new-only`
+    // --production-dupes excludes test/story/dev files from the DUPLICATION check. Test files are idiomatically
+    // repetitive (per-test setup boilerplate), so adding a test would otherwise count as new duplication and
+    // trip the new-only gate (a dogfood caught this). Dead-code and complexity still cover test files.
+    cfg.entropyCommand = cfg.entropyGate || `${cfg.fallowCommand} audit --gate new-only --production-dupes`
     cfg.entropyGateEnabled = resolvesOnPath(commandBinary(cfg.entropyCommand))
     if (!cfg.entropyGateEnabled) {
       log(`⚠ entropy gate not runnable (\`${commandBinary(cfg.entropyCommand)}\`) — skipping the dead-code/duplication gate.`)
