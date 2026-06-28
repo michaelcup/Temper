@@ -361,6 +361,23 @@ test('temper doctor warns about the no-entry-point bootstrap risk, and goes quie
   }
 })
 
+test('temper doctor warns when fallowCommand is an absolute path outside this repo (stale/leaked config)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'temper-stalefallow-'))
+  execFileSync('git', ['init', '-q'], { cwd: dir })
+  const base = { engines: { stub: { engine: 'true', critic: 'true' } }, engine: 'stub' }
+  const cfg = (fallowCommand) => writeFileSync(join(dir, 'temper.config.json'), JSON.stringify({ ...base, fallowCommand }))
+  try {
+    cfg('/bin/echo') // an absolute path to a real binary outside the temp repo
+    assert.match(temper(dir, ['doctor']).out, /points outside this repo/, 'flags an absolute fallow path outside the repo')
+    cfg('fallow')
+    assert.doesNotMatch(temper(dir, ['doctor']).out, /points outside this repo/, 'a bare command does not warn')
+    cfg('node_modules/.bin/fallow')
+    assert.doesNotMatch(temper(dir, ['doctor']).out, /points outside this repo/, 'a relative path does not warn')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('temper run does NOT false-fail a subshell acceptance command (it runs to a green gate)', () => {
   const dir = mkdtempSync(join(tmpdir(), 'temper-subshell-'))
   const g = (a) => execFileSync('git', a, { cwd: dir })

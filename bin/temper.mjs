@@ -11,7 +11,7 @@
 // engine, plan, loop, phases, eval).
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, isAbsolute, relative } from 'node:path'
 import { run, log, fail, requireCleanRepo, commandBinary, resolvesOnPath } from '../src/sh.mjs'
 import { loadConfig, resolveEngines, applyMaxIterations, applyQueueBudget, hasFallowConfig, projectHasTests, hasPackageEntry, DEFAULTS } from '../src/config.mjs'
 import { parsePlan, runPlanDraft, writePlanTemplate } from '../src/plan.mjs'
@@ -88,6 +88,17 @@ function preflightOnboarding() {
       'committing (the #1 onboarding footgun). I scaffolded `.fallowrc.json` for you.\n' +
       '→ Commit it, then re-run:  git add .fallowrc.json && git commit -m "chore: add fallow config"',
   )
+}
+
+// Shared preamble for the loop-running commands (`run`, `overnight`): clean tree, onboarding scaffold,
+// engine resolution, PATH check, iteration cap. requireCleanRepo runs before the preflight so a scaffold
+// never lands in a dirty tree.
+function preflightRun(cfg, flags) {
+  requireCleanRepo()
+  preflightOnboarding()
+  resolveEngines(cfg, flags.engine)
+  if (!resolvesOnPath(commandBinary(cfg.engineCommand))) fail(`engine \`${commandBinary(cfg.engineCommand)}\` is not on your PATH. Install it or fix "engine" in temper.config.json, then run \`temper doctor\`.`)
+  applyMaxIterations(cfg, flags)
 }
 
 // The user-tunable keys `temper init` writes into temper.config.json — values pulled from DEFAULTS so
@@ -194,6 +205,17 @@ function logCommitHint(configs) {
   log(`  • Commit the new config file${plural} (${configs.join(', ')}) — the next \`temper run\` requires a clean repo and will abort on these untracked files.`)
 }
 
+// A leaked/stale fallowCommand (e.g. an absolute path into a SIBLING project's node_modules) still resolves
+// on disk, so doctor's checks stay green while pointing fallow at the wrong repo. Warn only for an absolute
+// path that exists but lives outside this repo. A bare command or a relative path is fine; an unset config
+// yields a non-absolute binary string, so isAbsolute already filters it.
+function warnFallowOutsideRepo(fallowCommand) {
+  const bin = commandBinary(fallowCommand)
+  if (!isAbsolute(bin) || !existsSync(bin) || !relative(process.cwd(), bin).startsWith('..')) return
+  log(`\n⚠ \`fallowCommand\` points outside this repo (\`${bin}\`); it is probably a stale or leaked config.`)
+  log('  Set "fallowCommand" to "fallow" (global) or "node_modules/.bin/fallow" (local).')
+}
+
 function doctor(cfg) {
   // Check the engine/critic BINARY resolves (the most likely first-run failure), not just git+fallow.
   // Best-effort: the binary is on PATH — not that auth works (that surfaces on the first real call).
@@ -241,6 +263,7 @@ function doctor(cfg) {
     log("\nℹ Using the `codex` engine: verify `rateLimit.patterns` in temper.config.json match Codex's cap")
     log('  wording (the defaults are Claude-worded), or a Codex cap will escalate instead of sleeping + resuming.')
   }
+  warnFallowOutsideRepo(cfg.fallowCommand)
   log(`\nengine (${cfg.engineName}): ${cfg.engineCommand}`)
   log(`critic (${cfg.criticName}): ${cfg.criticCommand}`)
   log(
@@ -307,11 +330,7 @@ function main() {
     // Default to ./PLAN.md (what `temper plan` writes) so the plan -> run handoff needs no retyping.
     const planPath = arg ?? (existsSync(join(process.cwd(), 'PLAN.md')) ? 'PLAN.md' : null)
     if (!planPath) fail('Usage: temper run <plan.md> [--engine <name>] [--max-iterations <n>], or run with no arg from a dir holding ./PLAN.md.')
-    requireCleanRepo() // before the preflight: never scaffold a config into a dirty tree
-    preflightOnboarding()
-    resolveEngines(cfg, flags.engine)
-    if (!resolvesOnPath(commandBinary(cfg.engineCommand))) fail(`engine \`${commandBinary(cfg.engineCommand)}\` is not on your PATH. Install it or fix "engine" in temper.config.json, then run \`temper doctor\`.`)
-    applyMaxIterations(cfg, flags)
+    preflightRun(cfg, flags)
     log(`engine: ${cfg.engineName}   critic: ${cfg.criticName}\n`)
     runLoop(cfg, parsePlan(planPath))
   } else if (cmd === 'plan') {
@@ -332,11 +351,7 @@ function main() {
     const limit = 'all' in flags ? 0 : 'limit' in flags ? Math.max(0, parseInt(flags.limit, 10) || 0) : undefined
     runAudit(cfg, arg, limit === undefined ? {} : { limit })
   } else if (cmd === 'overnight' || cmd === 'run-phases') {
-    requireCleanRepo() // before the preflight: never scaffold a config into a dirty tree
-    preflightOnboarding()
-    resolveEngines(cfg, flags.engine)
-    if (!resolvesOnPath(commandBinary(cfg.engineCommand))) fail(`engine \`${commandBinary(cfg.engineCommand)}\` is not on your PATH. Install it or fix "engine" in temper.config.json, then run \`temper doctor\`.`)
-    applyMaxIterations(cfg, flags)
+    preflightRun(cfg, flags)
     applyQueueBudget(cfg, flags)
     log(`engine: ${cfg.engineName}   critic: ${cfg.criticName}\n`)
     // `temper overnight` defaults the unattended path ON (own branch + morning report — the safe default
