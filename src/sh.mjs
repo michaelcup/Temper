@@ -54,9 +54,21 @@ export const git = (args) => run(`git ${args}`).out.trim()
 
 // The leading executable of a shell command — the rightmost pipe stage, skipping any VAR=val prefixes.
 // "cat {promptFile} | claude -p" → "claude"; "npm test" → "npm"; "VAR=1 pytest -q" → "pytest".
+// A `|` inside quotes (e.g. a grep/sed pattern's regex alternation) is an argument, not a shell pipe,
+// so quoted pipes don't count when finding the rightmost stage.
 // Best-effort, for prerequisite checks (doctor's engine check, the acceptance-command check).
 export function commandBinary(command) {
-  const stage = String(command).split('|').pop().trim()
+  const s = String(command)
+  let inSingle = false
+  let inDouble = false
+  let lastPipe = -1
+  for (let j = 0; j < s.length; j++) {
+    const c = s[j]
+    if (c === "'" && !inDouble) inSingle = !inSingle
+    else if (c === '"' && !inSingle) inDouble = !inDouble
+    else if (c === '|' && !inSingle && !inDouble) lastPipe = j
+  }
+  const stage = (lastPipe === -1 ? s : s.slice(lastPipe + 1)).trim()
   const toks = stage.split(/\s+/)
   let i = 0
   while (i < toks.length && /^[A-Za-z_]\w*=/.test(toks[i])) i++ // skip leading env assignments
