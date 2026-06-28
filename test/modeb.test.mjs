@@ -491,6 +491,23 @@ test('a stale/old-format ledger entry does not crash the report or strand HEAD',
   }
 })
 
+test('a scope escalation lists the out-of-scope files as ready-to-paste Plan scope entries', () => {
+  // The engine writes a file OUTSIDE scope every iteration → the scope gate recurs → escalates on scope.
+  const engine = `sh -c 'echo junk > out-of-scope.txt'`
+  const dir = setup(
+    { engines: { stub: { engine, critic: "echo '{}'" } }, engine: 'stub', fallowCommand: 'true', criticMode: 'off', maxIterations: 2 },
+    [['p', 'x', ['src/**']]],
+  )
+  try {
+    const r = temper(dir, ['run-phases', '.temper/phases', '--engine', 'stub'])
+    assert.notEqual(r.code, 0, r.out)
+    assert.match(r.out, /files the change needed but the Plan did not allow:/)
+    assert.match(r.out, /- "out-of-scope\.txt"/, 'the out-of-scope file is listed as a pasteable scope entry')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('the notify hook fires on a terminal outcome with TEMPER_* context', () => {
   const out = join(mkdtempSync(join(tmpdir(), 'temper-notify-')), 'event')
   const dir = setup(

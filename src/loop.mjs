@@ -26,11 +26,12 @@ function runGates(cfg, plan, baseSha) {
   }
 
   let deadNewFiles = []
+  let outOfScope = []
   const changed = changedFiles(baseSha)
   if (!changed.length) {
     flag('no-changes', 'Your previous attempt made no file changes. Implement the task by editing files within scope.')
   } else {
-    const outOfScope = changed.filter((f) => !inScope(f, plan.scope))
+    outOfScope = changed.filter((f) => !inScope(f, plan.scope))
     if (outOfScope.length) flag('scope', `Files changed outside the allowed scope: ${outOfScope.join(', ')}. Revert them. If the task genuinely needs them, do NOT edit them: say which one blocks you, and the human will add it to the Plan's scope.`)
 
     for (const pv of protectionViolations(baseSha, plan, changed)) flag('protected', pv)
@@ -66,7 +67,7 @@ function runGates(cfg, plan, baseSha) {
       if (!comp.complete) flag('completeness', `The change does not fully implement the Plan — still missing: ${comp.missing}. Complete it.`)
     }
   }
-  return { violations, fired, firedFull, changed, deadNewFiles }
+  return { violations, fired, firedFull, changed, deadNewFiles, outOfScope }
 }
 
 // The actionable fix for a fallow dynamic-load false-positive, handed to the engine on re-prompt: a
@@ -127,12 +128,19 @@ function escalateDeadFile(files, baseSha, runStart, elapsed) {
 
 // R2: a failure-domain that fails N iterations in a row is not converging — surface
 // a structured summary to the human instead of silently burning the iteration budget.
-function escalateStuck(domain, streak, history, baseSha, runStart, elapsed) {
+function escalateStuck(domain, streak, history, baseSha, runStart, elapsed, outOfScopeFiles = []) {
   log(`\n■ STUCK — failure-domain "${domain}" failed ${streak} iterations in a row. Escalating instead of burning iterations.`)
   log('  This is not converging; it needs your judgment — the plan, the gate, or the task may be wrong.')
   log(`  → \`temper explain ${domain}\` says what this gate checks and how to clear it.`)
   if (domain === 'no-changes') log("  → no edits usually means the engine isn't editing headlessly — run `temper doctor`.")
-  if (domain === 'scope') log("  → the engine kept editing files outside the Plan scope. If they genuinely need the change, add them to the Plan's scope list and re-run.")
+  if (domain === 'scope') {
+    log("  → the engine kept editing files outside the Plan scope. If they genuinely need the change, add them to the Plan's scope list and re-run.")
+    const entries = [...new Set(outOfScopeFiles)].sort()
+    if (entries.length) {
+      log('  files the change needed but the Plan did not allow:')
+      for (const f of entries) log(`    - "${f}"`)
+    }
+  }
   if (domain === 'acceptance') log('  → if the SAME error recurred while the code changed, the acceptance COMMAND is likely wrong (not the code) — run it against the working tree to check.')
   for (const h of history.filter((h) => h.msgs[domain])) {
     log(`   iter ${h.i} (${(h.ms / 1000).toFixed(1)}s): ${h.msgs[domain]}`)
@@ -167,6 +175,7 @@ export function runPlan(cfg, plan, { baseSha }) {
   const domainStreaks = new Map()
   const repeatStreaks = new Map() // consecutive iterations a domain fired with the IDENTICAL finding
   const deadFileHits = new Map() // new file -> TOTAL iterations fallow flagged it unreachable (non-resetting)
+  const outOfScopeSeen = new Set() // UNION of out-of-scope files across iterations, for the scope-escalation hint
   let prevFiredFull = new Map()
   const history = []
   let prevViolations = []
@@ -176,7 +185,8 @@ export function runPlan(cfg, plan, { baseSha }) {
     log('• engine: implementing…')
     const eng = callCli(cfg.engineCommand, enginePrompt(plan, prevViolations), cfg)
 
-    const { violations, fired, firedFull, changed, deadNewFiles } = runGates(cfg, plan, baseSha)
+    const { violations, fired, firedFull, changed, deadNewFiles, outOfScope } = runGates(cfg, plan, baseSha)
+    for (const f of outOfScope) outOfScopeSeen.add(f)
 
     // An engine call that exits non-zero AND changed nothing is almost always infra (auth 401, network, a
     // broken engine command), not the model declining to edit. Surface its OWN output so this self-diagnoses
@@ -218,7 +228,7 @@ export function runPlan(cfg, plan, { baseSha }) {
       // when the SAME finding recurs unchanged (the engine made zero progress on an identical finding).
       const stuck = [...fired.keys()].find((d) => domainStreaks.get(d) >= cfg.maxDomainRetries || repeatStreaks.get(d) >= cfg.maxUnchangedRetries)
       if (stuck) {
-        escalateStuck(stuck, domainStreaks.get(stuck), history, baseSha, runStart, elapsed)
+        escalateStuck(stuck, domainStreaks.get(stuck), history, baseSha, runStart, elapsed, [...outOfScopeSeen])
         return { status: 'escalated', sha: baseSha, iterations: i, seconds: elapsed(runStart), violations, stuckDomain: stuck }
       }
       prevViolations = violations
