@@ -329,7 +329,8 @@ function main() {
     if (arg === 'add') addTask(cfg, positionals[2], queueDir, 'reconcile' in flags)
     else runTasks(cfg, arg, queueDir)
   } else if (cmd === 'audit') {
-    runAudit(cfg, arg)
+    const limit = 'all' in flags ? 0 : 'limit' in flags ? Math.max(0, parseInt(flags.limit, 10) || 0) : undefined
+    runAudit(cfg, arg, limit === undefined ? {} : { limit })
   } else if (cmd === 'overnight' || cmd === 'run-phases') {
     requireCleanRepo() // before the preflight: never scaffold a config into a dirty tree
     preflightOnboarding()

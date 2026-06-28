@@ -80,7 +80,7 @@ function planFor(g, acc) {
 // Turn fallow's full dead-code report into reviewable, scoped cleanup Plans. A THIN bridge: fallow finds the
 // entropy, the human approves the list, the gated loop removes it safely. v1 covers dead code (unused exports
 // and unused files), the clearest and most verifiable cleanup. It PROPOSES and never runs the cleanup itself.
-export function runAudit(cfg, dir) {
+export function runAudit(cfg, dir, { limit = MAX_GROUPS } = {}) {
   const root = dir && dir !== '.' ? dir : process.cwd()
   if (!cfg.fallowCommand) {
     fail('`temper audit` needs fallow for JS/TS dead-code analysis. Install it (`npm i -g fallow`), then `temper init` (or `fallow init`) to add an entry-aware config.')
@@ -119,7 +119,7 @@ export function runAudit(cfg, dir) {
   const isFP = (g) => isLikelyFalsePositive(g.path) || dynBases.has(stripModuleExt(g.path))
   const real = groups.filter((g) => !isFP(g))
   const suspect = groups.filter((g) => isFP(g))
-  const kept = real.slice(0, MAX_GROUPS)
+  const kept = limit > 0 ? real.slice(0, limit) : real // limit 0 (e.g. `--all`): no cap, one Plan per finding
   const dropped = real.length - kept.length
   const acc = repoTestCommand(root)
 
@@ -135,7 +135,7 @@ export function runAudit(cfg, dir) {
 
   log(`\n■ Audit found ${rawExports.length} unused export(s) and ${rawFiles.length} unused file(s) across ${groups.length} file(s).`)
   if (kept.length) {
-    log(`  High-confidence cleanups: wrote ${kept.length} Plan(s) to .temper/audit/${dropped ? ` (of ${real.length}; ${dropped} over the cap, re-run for the rest)` : ''}. Each carries a VERIFY nudge; review each before running.`)
+    log(`  High-confidence cleanups: wrote ${kept.length} Plan(s) to .temper/audit/${dropped ? ` (of ${real.length}; ${dropped} over the cap, run \`temper audit --all\` for the rest)` : ''}. Each carries a VERIFY nudge; review each before running.`)
   } else {
     log('  No high-confidence cleanups: every finding is in a likely-false-positive location (below).')
   }

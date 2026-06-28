@@ -109,6 +109,27 @@ test('temper audit quarantines a dynamically-imported file (fallow false-positiv
   }
 })
 
+test('temper audit caps Plans at 25 by default; --all and --limit lift the cap', () => {
+  const unused_files = Array.from({ length: 30 }, (_, i) => ({ path: `src/orphan${i}.mjs` }))
+  const dir = setup({ unused_exports: [], unused_files })
+  try {
+    const def = temper(dir, ['audit'])
+    assert.equal(def.code, 0, def.out)
+    assert.equal(plans(dir).length, 25, 'default caps at 25')
+    assert.match(def.out, /temper audit --all/, 'tells the user to run --all for the rest, not to re-run')
+
+    const all = temper(dir, ['audit', '--all'])
+    assert.equal(all.code, 0, all.out)
+    assert.equal(plans(dir).length, 30, '--all writes a Plan for every finding')
+
+    const limited = temper(dir, ['audit', '--limit', '5'])
+    assert.equal(limited.code, 0, limited.out)
+    assert.equal(plans(dir).length, 5, '--limit n writes n Plans')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('temper audit reports nothing to do on a clean codebase', () => {
   const dir = setup({ unused_exports: [], unused_files: [] })
   try {
