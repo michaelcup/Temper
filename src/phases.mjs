@@ -4,7 +4,7 @@
 import { existsSync, readFileSync, writeFileSync, readdirSync, mkdirSync } from 'node:fs'
 import { join, dirname, resolve, basename } from 'node:path'
 import { createHash } from 'node:crypto'
-import { run, runArgs, log, git, fail, requireCleanRepo, acquireLock, notify, state } from './sh.mjs'
+import { run, runArgs, log, git, fail, requireCleanRepo, acquireLock, notify, state, mdCell } from './sh.mjs'
 import { parsePlan, validatePlan, draftPlan } from './plan.mjs'
 import { runPlan } from './loop.mjs'
 import { runDirectionCheck, runReconcile } from './engine.mjs'
@@ -83,10 +83,6 @@ function isResumable(prior, fingerprint) {
 }
 
 const exitCodeFor = (status) => (status === 'halted' ? 2 : status === 'escalated' ? 4 : status === 'gamed' ? 5 : status === 'error' ? 1 : 3)
-
-// Neutralize markdown-structure chars so a plan title / violation text (which can be arbitrary
-// command output) can't break the report table or inject headings/fences. One line, no pipes, no fences.
-const mdCell = (s) => String(s).replace(/\r?\n+/g, ' ').replace(/\|/g, '\\|').replace(/`/g, "'")
 
 // Confirm a DECLARED scope overlap against what the phases ACTUALLY committed. Two phases can claim the same
 // file yet not contend: in a sequential gated queue, a later phase that only ADDS to a shared file, or that

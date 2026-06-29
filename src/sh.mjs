@@ -78,6 +78,10 @@ export function commandBinary(command) {
 // Does a binary resolve on PATH (or as a shell builtin)? `command -v` is a POSIX builtin.
 export const resolvesOnPath = (bin) => !!bin && run(`command -v "${bin}"`).code === 0
 
+// Neutralize markdown-structure chars so arbitrary text (a plan title, command output, an engine
+// finding) can't break a table or inject headings/fences. One line, no raw pipes, no backticks.
+export const mdCell = (s) => String(s).replace(/\r?\n+/g, ' ').replace(/\|/g, '\\|').replace(/`/g, "'")
+
 // eslint-disable-next-line no-control-regex
 export const stripAnsi = (s) => s.replace(/\x1b\[[0-9;]*m/g, '') // tool color codes — noise in the log + re-prompt
 // For the unchanged-finding fast-bail: strip ONLY fallow's volatile noise so a finding that differs
