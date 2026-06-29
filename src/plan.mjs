@@ -71,6 +71,14 @@ export function validatePlan(plan) {
   if (hit) {
     fail(`Plan has an unresolved decision (found "${hit}"). Resolve every open question before running — a vague plan produces vague code.`)
   }
+  // `removesRoot:` entries become git-grep pathspecs in the removal gate. A typo'd, empty, or out-of-repo path
+  // makes git grep error (exit 128) or otherwise read as "nothing survived", silently disabling a safety gate.
+  // Validate each here, at preflight, so a bad root fails loud and early — not as a false-green at run time.
+  for (const r of plan.removesRoot) {
+    if (!r || r.startsWith('/') || r.split('/').includes('..') || !existsSync(r)) {
+      fail(`Plan \`removesRoot:\` entry "${r}" must be a non-empty path INSIDE the repo that exists (it scopes the removal gate's search). Use e.g. "src" or "src/contracts", or omit removesRoot to search the whole repo.`)
+    }
+  }
   if (!plan.acceptance) {
     log('⚠  No `acceptance` command — the loop will gate on fallow + scope only.\n')
     return

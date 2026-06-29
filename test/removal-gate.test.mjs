@@ -8,7 +8,19 @@ import { execFileSync } from 'node:child_process'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { survivingReferences } from '../src/gates.mjs'
+
+const HERE = dirname(fileURLToPath(import.meta.url))
+const TEMPER = join(HERE, '..', 'bin', 'temper.mjs')
+const PLANJS = join(HERE, '..', 'src', 'plan.mjs')
+const node = (args, cwd) => {
+  try {
+    return { code: 0, out: execFileSync('node', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) }
+  } catch (e) {
+    return { code: e.status ?? 1, out: `${e.stdout ?? ''}${e.stderr ?? ''}` }
+  }
+}
 
 function repo() {
   const dir = mkdtempSync(join(tmpdir(), 'temper-removal-'))
@@ -60,4 +72,38 @@ test('survivingReferences honors removesRoot scoping and uses fixed-string (not 
     process.chdir(cwd)
     rmSync(dir, { recursive: true, force: true })
   }
+})
+
+test('survivingReferences THROWS on an out-of-repo root instead of silently passing (no false-green)', () => {
+  const { dir } = repo()
+  const cwd = process.cwd()
+  try {
+    process.chdir(dir)
+    // `..` is outside the repo, so git grep exits 128. The term IS present in the repo; treating a failed
+    // search as "no leftovers" would silently disable a safety gate, so it must throw, not return [].
+    assert.throws(() => survivingReferences(['external_site.agent_handoff.create'], ['..']), /could not search/)
+  } finally {
+    process.chdir(cwd)
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('validatePlan rejects a removesRoot outside the repo at preflight (the real false-green fix)', () => {
+  const { dir } = repo()
+  try {
+    // validatePlan calls fail() -> process.exit, so exercise it in a child process and read its exit/output.
+    const script = `import { validatePlan } from ${JSON.stringify(PLANJS)}; validatePlan({ scope: ['src/keep.ts'], removes: ['x'], removesRoot: ['../evil'], acceptance: null, heldout: null, title: 't', body: 'b' })`
+    const r = node(['--input-type=module', '-e', script], dir)
+    assert.notEqual(r.code, 0, 'a removesRoot containing .. must be rejected before the loop runs')
+    assert.match(r.out, /removesRoot/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('temper explain removal documents the gate (the stuck banner points users here)', () => {
+  const r = node([TEMPER, 'explain', 'removal'], HERE)
+  assert.equal(r.code, 0, r.out)
+  assert.match(r.out, /Removal-completeness gate/)
+  assert.match(r.out, /removes:/)
 })

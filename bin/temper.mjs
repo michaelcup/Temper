@@ -287,6 +287,7 @@ const EXPLAIN = {
   'fallow-audit': ['Dead-code / duplication / complexity gate (fallow)', 'The change introduced new entropy: unreachable code, a duplicate of something that already exists, or rising complexity.', 'Reuse the existing code, delete the dead code, or simplify. If a NEW dynamically-loaded file is wrongly flagged unreachable, add a glob to `.fallowrc.json` "entry" (or run `temper init` if you have no fallow config yet).'],
   suppression: ['Suppression guard', 'The change ADDED a suppression (fallow-ignore, eslint-disable, @ts-ignore, a skipped test) — silencing a check is not fixing it.', 'Remove the directive and fix the underlying finding.'],
   acceptance: ['Acceptance gate', "The Plan's `acceptance:` command exited non-zero (tests/build/typecheck failed).", 'Run the acceptance command yourself against the working tree. If it fails the SAME way no matter what the engine changes (e.g. "command/module not found"), the command itself is wrong, not the code — e.g. use `node --test`, not `node --test <dir>/`.'],
+  removal: ['Removal-completeness gate', "Identifiers/paths listed under the Plan's `removes:` still appear somewhere in the tree — the string references in contracts / specs / docs that typecheck and tests cannot see.", 'Delete every remaining reference. If a survivor is an unrelated SUBSTRING match (matching is fixed-string, not whole-word), pick a more distinctive term, or set `removesRoot:` to the paths it should be gone from.'],
   completeness: ['Completeness check (opt-in)', 'An LLM check judged the diff did not implement every step of the Plan.', 'Finish the missing Plan steps, or correct the Plan if a step is obsolete.'],
   halted: ['Reuse-critic halt (exit 2)', 'The critic judged the change likely re-implements something that already exists (high confidence, halt mode).', 'Review the diff against the existing code it named — reuse it, or re-run if the critic is wrong.'],
   escalated: ['Stuck-domain escalation (exit 4)', 'One gate failed repeatedly without converging, so Temper stopped instead of burning iterations.', 'The plan, the gate, or the task likely needs your judgment. Read the per-iteration findings above, then fix the root cause.'],
@@ -349,7 +350,10 @@ function main() {
     else runTasks(cfg, arg, queueDir)
   } else if (cmd === 'audit') {
     const limit = 'all' in flags ? 0 : 'limit' in flags ? Math.max(0, parseInt(flags.limit, 10) || 0) : undefined
-    runAudit(cfg, arg, { ...(limit === undefined ? {} : { limit }), json: 'json' in flags, acceptance: 'acceptance' in flags ? flags.acceptance : null })
+    // A bare `--acceptance` (no value) parses as the boolean true, which would coerce to the PATH command `true`
+    // and silently make every generated Plan's gate always-green. Require an explicit command.
+    if ('acceptance' in flags && typeof flags.acceptance !== 'string') fail('`temper audit --acceptance` needs a command, e.g. --acceptance "npm run typecheck".')
+    runAudit(cfg, arg, { ...(limit === undefined ? {} : { limit }), json: 'json' in flags, acceptance: typeof flags.acceptance === 'string' ? flags.acceptance : null })
   } else if (cmd === 'overnight' || cmd === 'run-phases') {
     preflightRun(cfg, flags)
     applyQueueBudget(cfg, flags)

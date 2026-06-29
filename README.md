@@ -23,6 +23,7 @@ Plan (you approve)
        gate           (fallow audit --gate new-only)       ← deterministic, regression-scoped
        suppression    (no new fallow-ignore / @ts-ignore…) ← deterministic, anti-gaming
        acceptance     (your test/command, optional)        ← deterministic
+       removal        (no `removes:` identifier survives, opt-in)  ← deterministic
        ├─ any violation → re-prompt (fix the root cause; show evidence)
        │     └─ same domain stuck N× → escalate to you (don't burn iterations)
        └─ all green → reuse-critic (semantic, repo-searching)            ← LLM judgment

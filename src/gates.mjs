@@ -123,6 +123,10 @@ export function survivingReferences(terms, roots) {
   for (const term of terms) {
     if (!term) continue
     const r = runArgs('git', ['grep', '-F', '-l', '--untracked', '-e', term, '--', ...roots])
+    // git grep: 0 = matches, 1 = a clean no-match, anything else (128 = bad/outside-repo pathspec) is a FAILED
+    // search. Never read a failed search as "no leftovers" — that would turn this safety proof into a silent
+    // green. removesRoot is validated at plan preflight, so this is the belt to that suspenders; fail loud.
+    if (r.code > 1) throw new Error(`removal gate could not search for "${term}" in [${roots.join(', ')}] (git grep exit ${r.code}): ${(r.out || '').trim().slice(0, 200)}`)
     const files = r.code === 0 ? r.out.split('\n').filter(Boolean).sort() : []
     if (files.length) out.push({ term, files })
   }

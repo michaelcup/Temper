@@ -238,3 +238,14 @@ test('temper audit --acceptance rejects a non-runnable override before scanning'
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('temper audit --acceptance with no command is rejected (a bare flag would make every Plan always-green)', () => {
+  const dir = setup({ unused_exports: [{ path: 'src/a.mjs', export_name: 'dead', is_type_only: false, line: 1 }], unused_files: [] })
+  try {
+    const r = temper(dir, ['audit', '--acceptance'])
+    assert.notEqual(r.code, 0)
+    assert.match(r.out, /needs a command/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
