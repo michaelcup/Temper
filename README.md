@@ -254,13 +254,23 @@ until you give it sources:
   "enabled": true,
   "sources": ["docs/architecture.md", "https://your-framework.dev/docs/migration"], // local paths + URLs
   "every": 1,          // check every Nth phase (1 = every phase)
-  "onMiss": "warn"     // "warn": flag it in the report · "pause": stop the queue before the phase (exit 7)
+  "onMiss": "warn",    // "warn": flag it in the report · "pause": stop the queue before the phase (exit 7)
+  "ledger": true       // append findings to a living research ledger at .temper/research.md (opt-in)
 }
 ```
 
 The check is one bounded question to the critic engine, grounded **only** in your sources (local files
 are read directly; URLs are fetched only if the engine has web tools), never the open web, so an
 untrusted page can't steer it. It's fail-open (an unparseable verdict never blocks) and overnight-only.
+
+### Research ledger (opt-in)
+
+With `directionCheck.ledger: true`, each overnight direction check appends to one living research
+document at `.temper/research.md` instead of producing throwaway notes. Every finding records a
+situational **support** level and cites its **sources**; durable per-source **trust** lives in a
+`## Sources` table and in `.temper/trust-list.md`, a list you curate. When a run leans on a source you
+have not yet trusted, it is proposed as a marked candidate for you to confirm by hand. Temper never
+writes the trust-list. The ledger is appended, never respawned, and you prune it yourself.
 
 ## First-run checklist (the things most likely to bite)
 

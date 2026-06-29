@@ -142,3 +142,23 @@ test('a valid sound:false verdict is honored even when findings is garbage (best
   assert.equal(d.sound, false)
   assert.deepEqual(d.findings, [])
 })
+
+import { execFileSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
+import { dirname } from 'node:path'
+
+const TEMPER = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'temper.mjs')
+const runCli = (args) => {
+  try {
+    return { code: 0, out: execFileSync('node', [TEMPER, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) }
+  } catch (e) {
+    return { code: e.status ?? 1, out: `${e.stdout ?? ''}${e.stderr ?? ''}` }
+  }
+}
+
+test('temper explain direction mentions the research ledger and trust-list', () => {
+  const r = runCli(['explain', 'direction'])
+  assert.equal(r.code, 0, r.out)
+  assert.match(r.out, /research ledger/i)
+  assert.match(r.out, /trust-list/i)
+})
