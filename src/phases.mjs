@@ -319,7 +319,7 @@ export function runPhases(cfg, dir, opts = {}) {
       const d = runDirectionCheck(cfg, plan, { trustList, priorLedger })
       // Append BEFORE the pause branch below: the pause path calls process.exit(7), so a write placed
       // after it would skip the very phase that triggered the concern. Runs on sound, warn, and pause alike.
-      if (dc.ledger) appendResearch(researchPath, basename(process.cwd()), d.findings, d.candidateSources)
+      if (dc.ledger) appendResearch(researchPath, basename(resolve(dir)), d.findings, d.candidateSources)
       if (!d.sound) {
         direction = d
         log(`⚠ direction concern (${mdCell(d.source)}): ${mdCell(d.concern)}`)

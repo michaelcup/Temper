@@ -5,8 +5,12 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
+import { execFileSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import { appendResearch } from '../src/research.mjs'
+import { runDirectionCheck } from '../src/engine.mjs'
+import { DEFAULTS } from '../src/config.mjs'
 
 const tmp = () => mkdtempSync(join(tmpdir(), 'temper-research-'))
 const F = (over = {}) => ({ claim: 'C', support: 'high', sources: ['a'], note: 'N', ...over })
@@ -110,9 +114,6 @@ test('appendResearch never writes trust-list.md', () => {
   }
 })
 
-import { runDirectionCheck } from '../src/engine.mjs'
-import { DEFAULTS } from '../src/config.mjs'
-
 // Build a complete cfg (real DEFAULTS so rateLimit etc. exist) with a stub critic that echoes fixed JSON.
 const cfgWith = (json, ledger = true) => ({
   ...DEFAULTS,
@@ -143,10 +144,6 @@ test('a valid sound:false verdict is honored even when findings is garbage (best
   assert.deepEqual(d.findings, [])
 })
 
-import { execFileSync } from 'node:child_process'
-import { fileURLToPath } from 'node:url'
-import { dirname } from 'node:path'
-
 const TEMPER = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'temper.mjs')
 const runCli = (args) => {
   try {
@@ -155,6 +152,21 @@ const runCli = (args) => {
     return { code: e.status ?? 1, out: `${e.stdout ?? ''}${e.stderr ?? ''}` }
   }
 }
+
+test('non-string and blank sources are silently dropped; junk values never reach the rendered line', () => {
+  const dir = tmp()
+  try {
+    const p = join(dir, 'research.md')
+    appendResearch(p, 'r', [F({ claim: 'T', sources: ['react.dev', 123, null, { x: 1 }, '  '] })])
+    const line = readFileSync(p, 'utf8').split('\n').find((l) => l.startsWith('- **T**'))
+    assert.match(line, /Sources: \[react\.dev\]\./, 'valid string source is rendered')
+    assert.doesNotMatch(line, /123/, 'a numeric element is dropped')
+    assert.doesNotMatch(line, /null/, 'a null element is dropped')
+    assert.doesNotMatch(line, /\[object Object\]/, 'an object element is dropped')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
 
 test('temper explain direction mentions the research ledger and trust-list', () => {
   const r = runCli(['explain', 'direction'])

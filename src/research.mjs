@@ -19,13 +19,13 @@ const seedLedger = (repoName) =>
   '## Findings\n\n' +
   '## Open questions\n'
 
-// mdCell handles pipes/newlines/backticks; additionally drop a leading heading marker and any fence so
-// engine text can never inject document structure into a bullet.
-const clean = (s) => mdCell(s).replace(/^#+\s*/, '').replace(/```/g, "'''")
+// mdCell collapses newlines and neutralizes pipes and backticks, so a code fence cannot survive to this
+// point. clean() additionally strips a leading heading marker so engine text cannot inject a heading.
+const clean = (s) => mdCell(s).replace(/^#+\s*/, '')
 const level = (v) => (/^(high|medium|low)$/.test(v) ? v : 'low')
 
 const renderFinding = (f) => {
-  const sources = (Array.isArray(f.sources) ? f.sources : []).map((s) => `[${clean(s)}]`).join(', ')
+  const sources = (Array.isArray(f.sources) ? f.sources : []).filter((s) => typeof s === 'string' && s.trim()).map((s) => `[${clean(s)}]`).join(', ')
   const note = f.note ? ` ${clean(f.note)}` : ''
   return `- **${clean(f.claim)}**. Support: ${level(f.support)}.${sources ? ` Sources: ${sources}.` : ''}${note}`
 }

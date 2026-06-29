@@ -67,7 +67,7 @@ export const DEFAULTS = {
   // ONLY when `enabled` AND `sources` is non-empty, on a deterministic cadence (every Nth phase, 0-indexed
   // so phase 1 is always checked). onMiss: 'warn' (surface in the morning report) | 'pause' (stop the queue
   // before the phase). Fail-OPEN: an unparseable verdict never blocks.
-  // ledger: true (opt-in) maintains a living research ledger at .temper/research.md, biased to .temper/trust-list.md.
+  // ledger: true (opt-in) maintains a living research ledger at .temper/research.md, informed by .temper/trust-list.md.
   directionCheck: { enabled: false, sources: [], every: 1, onMiss: 'warn', ledger: false },
 }
 
