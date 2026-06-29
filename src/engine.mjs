@@ -173,23 +173,43 @@ export function runCompletenessCheck(cfg, plan, baseSha) {
 // trust-list (local doc paths the engine reads directly; URLs it fetches only if it has web tools). Flags
 // ONLY a concrete, SOURCED wrong-direction (deprecated / superseded / removed / contradicted premise), never
 // style or scope. Fail-OPEN: no usable verdict ⇒ sound (must never block an unattended queue on an LLM glitch).
-export function runDirectionCheck(cfg, plan) {
+export function runDirectionCheck(cfg, plan, { trustList = '', priorLedger = '' } = {}) {
+  const dc = cfg.directionCheck
+  const trustBlock = dc.ledger && trustList
+    ? 'You also have a curated TRUST-LIST (durable per-source trust). Prefer these sources and respect their levels:\n' + trustList + '\n\n'
+    : ''
+  const ledgerBlock = dc.ledger && priorLedger
+    ? 'These findings are ALREADY in the research ledger. Do NOT repeat them; add only new findings:\n' + priorLedger + '\n\n'
+    : ''
+  const ledgerAsk = dc.ledger
+    ? ' In the SAME JSON object also include "findings": an array of {"claim": "...", "support": "high|medium|low", "sources": ["id", ...], "note": "one sentence"} for what you learned, and "candidateSources": an array of {"source": "id", "trust": "high|medium|low", "why": "..."} for any source you leaned on that is not already trusted. Use [] for either if you have nothing to add.'
+    : ''
   const prompt =
     'You are checking whether a planned change takes the RIGHT APPROACH, not whether it is well-written, but' +
     'whether its PREMISE is sound and current. Below is the PLAN for an upcoming task.\n\n' +
     'Ground your judgment ONLY in these trusted sources (read local file paths directly; fetch URLs only if you ' +
     'have web tools). Do NOT free-browse the open web. If the sources are silent on this plan, return sound:true:\n' +
-    cfg.directionCheck.sources.map((s) => `  - ${s}`).join('\n') + '\n\n' +
+    dc.sources.map((s) => `  - ${s}`).join('\n') + '\n\n' +
+    trustBlock +
+    ledgerBlock +
     'Flag a direction-miss ONLY if a trusted source shows the plan relies on something deprecated, superseded, ' +
     'removed, or contradicted (a gone API, an outdated pattern, a false assumption). NEVER flag style, scope, ' +
     'naming, or "could be better"; flag only a concrete, sourced wrong-direction.\n\n' +
     'Reply with ONLY a JSON object as the LAST line, no prose: ' +
-    '{"sound": boolean, "concern": "one sentence, or none", "source": "which trusted source shows it, or none"}.\n\n' +
+    '{"sound": boolean, "concern": "one sentence, or none", "source": "which trusted source shows it, or none"}.' + ledgerAsk + '\n\n' +
     `PLAN:\n${plan.body}\n`
   const { out } = callCli(cfg.criticCommand, prompt, cfg)
   const v = lastJsonObject(out)
-  if (v && typeof v.sound === 'boolean') return { sound: v.sound, concern: v.concern ?? 'none', source: v.source ?? 'none' }
-  return { sound: true, concern: 'none', source: 'none' } // fail-OPEN: no usable verdict must never block the queue
+  if (v && typeof v.sound === 'boolean') {
+    return {
+      sound: v.sound,
+      concern: v.concern ?? 'none',
+      source: v.source ?? 'none',
+      findings: Array.isArray(v.findings) ? v.findings : [],
+      candidateSources: Array.isArray(v.candidateSources) ? v.candidateSources : [],
+    }
+  }
+  return { sound: true, concern: 'none', source: 'none', findings: [], candidateSources: [] } // fail-OPEN
 }
 
 // Reconcile critic — the ONE judgment call in task orchestration. Invoked ONLY when the deterministic

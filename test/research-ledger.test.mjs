@@ -109,3 +109,36 @@ test('appendResearch never writes trust-list.md', () => {
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+import { runDirectionCheck } from '../src/engine.mjs'
+import { DEFAULTS } from '../src/config.mjs'
+
+// Build a complete cfg (real DEFAULTS so rateLimit etc. exist) with a stub critic that echoes fixed JSON.
+const cfgWith = (json, ledger = true) => ({
+  ...DEFAULTS,
+  criticCommand: `echo '${json}'`,
+  directionCheck: { ...DEFAULTS.directionCheck, enabled: true, sources: ['x'], ledger },
+})
+
+test('runDirectionCheck parses optional findings + candidateSources when ledger is on', () => {
+  const json = '{"sound":true,"concern":"none","source":"none","findings":[{"claim":"C","support":"high","sources":["a"],"note":"N"}],"candidateSources":[{"source":"k","trust":"high","why":"w"}]}'
+  const d = runDirectionCheck(cfgWith(json), { body: 'p' }, { trustList: '', priorLedger: '' })
+  assert.equal(d.sound, true)
+  assert.equal(d.findings.length, 1)
+  assert.equal(d.findings[0].claim, 'C')
+  assert.equal(d.candidateSources[0].source, 'k')
+})
+
+test('runDirectionCheck fail-opens to sound:true with empty arrays on non-JSON', () => {
+  const d = runDirectionCheck(cfgWith('not json at all'), { body: 'p' }, {})
+  assert.equal(d.sound, true)
+  assert.deepEqual(d.findings, [])
+  assert.deepEqual(d.candidateSources, [])
+})
+
+test('a valid sound:false verdict is honored even when findings is garbage (best-effort never downgrades the verdict)', () => {
+  const json = '{"sound":false,"concern":"bad","source":"s","findings":"oops-not-an-array"}'
+  const d = runDirectionCheck(cfgWith(json), { body: 'p' }, {})
+  assert.equal(d.sound, false)
+  assert.deepEqual(d.findings, [])
+})
