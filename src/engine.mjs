@@ -185,7 +185,7 @@ export function runDirectionCheck(cfg, plan, { trustList = '', priorLedger = '' 
     ? ' In the SAME JSON object also include "findings": an array of {"claim": "...", "support": "high|medium|low", "sources": ["id", ...], "note": "one sentence"} for what you learned, and "candidateSources": an array of {"source": "id", "trust": "high|medium|low", "why": "..."} for any source you leaned on that is not already trusted. Use [] for either if you have nothing to add.'
     : ''
   const prompt =
-    'You are checking whether a planned change takes the RIGHT APPROACH, not whether it is well-written, but' +
+    'You are checking whether a planned change takes the RIGHT APPROACH, not whether it is well-written, but ' +
     'whether its PREMISE is sound and current. Below is the PLAN for an upcoming task.\n\n' +
     'Ground your judgment ONLY in these trusted sources (read local file paths directly; fetch URLs only if you ' +
     'have web tools). Do NOT free-browse the open web. If the sources are silent on this plan, return sound:true:\n' +
