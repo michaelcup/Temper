@@ -9,12 +9,13 @@ import { join, dirname } from 'node:path'
 export const state = { logQuiet: false, totalSleptMs: 0 }
 
 // Never throws on a non-zero exit; returns the code and combined output.
-export function run(cmd, { env } = {}) {
+export function run(cmd, { env, cwd } = {}) {
   try {
     const out = execSync(cmd, {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env, ...env },
+      cwd, // undefined => process.cwd() (execSync default), so existing callers are unaffected
     })
     return { code: 0, out }
   } catch (e) {

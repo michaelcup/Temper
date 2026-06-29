@@ -56,7 +56,7 @@ export function parsePlan(path) {
 // reflects THIS host's /bin/sh, so a bashism valid on macOS may still fail on a dash-based Linux runner.
 // Returns the last error line, or null if the command parses cleanly (or the shell couldn't be spawned — a
 // real syntax error always writes to stderr, so empty output means a spawn failure: fail open, don't reject).
-function shellSyntaxError(command) {
+export function shellSyntaxError(command) {
   const { code, out } = runArgs('/bin/sh', ['-n', '-c', command])
   if (code === 0) return null
   const msg = out.trim()

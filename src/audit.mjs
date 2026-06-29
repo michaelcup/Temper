@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, rmSync } from 'node:fs'
 import { join, basename } from 'node:path'
-import { log, fail, runArgs, resolvesOnPath } from './sh.mjs'
+import { log, fail, run, runArgs, resolvesOnPath, commandBinary } from './sh.mjs'
+import { shellSyntaxError } from './plan.mjs'
 
 // A cleanup queue you can actually review in one sitting. Findings past this are reported, never silently dropped.
 const MAX_GROUPS = 25
@@ -80,10 +81,18 @@ function planFor(g, acc) {
 // Turn fallow's full dead-code report into reviewable, scoped cleanup Plans. A THIN bridge: fallow finds the
 // entropy, the human approves the list, the gated loop removes it safely. v1 covers dead code (unused exports
 // and unused files), the clearest and most verifiable cleanup. It PROPOSES and never runs the cleanup itself.
-export function runAudit(cfg, dir, { limit = MAX_GROUPS, json = false } = {}) {
+export function runAudit(cfg, dir, { limit = MAX_GROUPS, json = false, acceptance = null } = {}) {
   const root = dir && dir !== '.' ? dir : process.cwd()
   if (!cfg.fallowCommand) {
     fail('`temper audit` needs fallow for JS/TS dead-code analysis. Install it (`npm i -g fallow`), then `temper init` (or `fallow init`) to add an entry-aware config.')
+  }
+  // A --acceptance override becomes every generated Plan's gate; validate it ONCE here (same checks as the
+  // run preflight) so a typo'd or broken command fails immediately, not on every cleanup run.
+  if (acceptance) {
+    const accBin = commandBinary(acceptance)
+    if (accBin && /^[\w./-]/.test(accBin) && !resolvesOnPath(accBin)) fail(`--acceptance isn't runnable: \`${acceptance}\` (\`${accBin}\` is not on your PATH).`)
+    const syn = shellSyntaxError(acceptance)
+    if (syn) fail(`--acceptance has a shell syntax error: ${syn}\n  → \`${acceptance}\``)
   }
   // Full project (not changed-only), JSON for parsing. argv path: no shell, so fallow + flags + paths stay inert.
   const parts = cfg.fallowCommand.trim().split(/\s+/)
@@ -135,7 +144,7 @@ export function runAudit(cfg, dir, { limit = MAX_GROUPS, json = false } = {}) {
 
   const kept = limit > 0 ? real.slice(0, limit) : real // limit 0 (e.g. `--all`): no cap, one Plan per finding
   const dropped = real.length - kept.length
-  const acc = repoTestCommand(root)
+  const acc = acceptance || repoTestCommand(root) // --acceptance overrides the detected test command
 
   if (kept.length) {
     const outDir = join(root, '.temper', 'audit')
@@ -145,6 +154,15 @@ export function runAudit(cfg, dir, { limit = MAX_GROUPS, json = false } = {}) {
       const name = `${String(i + 1).padStart(2, '0')}-${slug(g.file ? `delete-${basename(g.path)}` : `clean-${basename(g.path)}`)}.md`
       writeFileSync(join(outDir, name), planFor(g, acc))
     })
+  }
+
+  // Baseline probe: run the effective acceptance ONCE. If it is already failing on the current tree, every
+  // cleanup Plan gates on it, so `temper overnight` would fail every Plan's gate and skip them all. The
+  // probe command is exactly what each Plan gates on, so one run is representative. Warn now, not next morning.
+  let baselineRed = false
+  if (kept.length && acc) {
+    log(`• probing the acceptance baseline (${acc})…`)
+    baselineRed = run(acc, { cwd: root }).code !== 0
   }
 
   log(`\n■ Audit found ${rawExports.length} unused export(s) and ${rawFiles.length} unused file(s) across ${groups.length} file(s).`)
@@ -162,5 +180,8 @@ export function runAudit(cfg, dir, { limit = MAX_GROUPS, json = false } = {}) {
   // Dead code is the verifiable cleanup (delete, gate confirms, entropy drops). Duplication and complexity are
   // judgment-heavy refactors that fit the gated loop poorly, so the audit points at fallow rather than auto-proposing them.
   log('  For duplication and complexity, run `fallow dupes` and `fallow health` directly; those are judgment refactors, not the verifiable deletions this audit targets.')
-  if (kept.length) log('  Then: temper overnight .temper/audit --keep-going  (independent cleanups; one skip will not halt the rest)')
+  if (kept.length) {
+    if (baselineRed) log(`  ⚠ The acceptance command (${acc}) is already FAILING on the current tree, so every cleanup Plan's gate would fail and \`temper overnight\` would skip them all. Fix the baseline first, or re-run with \`temper audit --acceptance "npm run typecheck"\`.`)
+    else log('  Then: temper overnight .temper/audit --keep-going  (independent cleanups; one skip will not halt the rest)')
+  }
 }

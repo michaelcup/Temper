@@ -201,3 +201,40 @@ test('temper audit fails clearly when fallow is not installed', () => {
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('temper audit --acceptance overrides each Plan gate and probes a GREEN baseline', () => {
+  const dir = setup({ unused_exports: [{ path: 'src/a.mjs', export_name: 'dead', is_type_only: false, line: 1 }], unused_files: [] })
+  try {
+    const r = temper(dir, ['audit', '--acceptance', 'true'])
+    assert.equal(r.code, 0, r.out)
+    assert.match(read(dir, plans(dir)[0]), /acceptance: "true"/, 'the override becomes each Plan gate (not the detected npm test)')
+    assert.match(r.out, /probing the acceptance baseline/, 'it probes the baseline')
+    assert.match(r.out, /Then: temper overnight/, 'green baseline still suggests overnight')
+    assert.doesNotMatch(r.out, /already FAILING/, 'green baseline raises no warning')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('temper audit warns when the acceptance baseline is already RED (overnight would skip everything)', () => {
+  const dir = setup({ unused_exports: [{ path: 'src/a.mjs', export_name: 'dead', is_type_only: false, line: 1 }], unused_files: [] })
+  try {
+    const r = temper(dir, ['audit', '--acceptance', 'false'])
+    assert.equal(r.code, 0, r.out)
+    assert.match(r.out, /already FAILING/, 'a red baseline gets a prominent warning')
+    assert.doesNotMatch(r.out, /Then: temper overnight/, 'and does NOT suggest overnight, which would skip every Plan')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('temper audit --acceptance rejects a non-runnable override before scanning', () => {
+  const dir = setup({ unused_exports: [{ path: 'src/a.mjs', export_name: 'dead', is_type_only: false, line: 1 }], unused_files: [] })
+  try {
+    const r = temper(dir, ['audit', '--acceptance', 'definitelynotacmd_zzz --x'])
+    assert.notEqual(r.code, 0)
+    assert.match(r.out, /isn't runnable|not on your PATH/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

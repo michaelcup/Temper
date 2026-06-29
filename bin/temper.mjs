@@ -349,7 +349,7 @@ function main() {
     else runTasks(cfg, arg, queueDir)
   } else if (cmd === 'audit') {
     const limit = 'all' in flags ? 0 : 'limit' in flags ? Math.max(0, parseInt(flags.limit, 10) || 0) : undefined
-    runAudit(cfg, arg, { ...(limit === undefined ? {} : { limit }), json: 'json' in flags })
+    runAudit(cfg, arg, { ...(limit === undefined ? {} : { limit }), json: 'json' in flags, acceptance: 'acceptance' in flags ? flags.acceptance : null })
   } else if (cmd === 'overnight' || cmd === 'run-phases') {
     preflightRun(cfg, flags)
     applyQueueBudget(cfg, flags)
