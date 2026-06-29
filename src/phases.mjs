@@ -8,6 +8,7 @@ import { run, runArgs, log, git, fail, requireCleanRepo, acquireLock, notify, st
 import { parsePlan, validatePlan, draftPlan } from './plan.mjs'
 import { runPlan } from './loop.mjs'
 import { runDirectionCheck, runReconcile } from './engine.mjs'
+import { appendResearch } from './research.mjs'
 import { detectScopeConflicts, scopesOverlap } from './conflicts.mjs'
 
 // Shown when a queue has no phase files yet — the missing on-ramp between Mode A and Mode B.
@@ -307,7 +308,18 @@ export function runPhases(cfg, dir, opts = {}) {
     const dc = cfg.directionCheck
     if (opts.overnight && dc.enabled && dc.sources.length && n % dc.every === 0) {
       log(`• direction check: grounding the approach against ${dc.sources.length} trusted source(s)…`)
-      const d = runDirectionCheck(cfg, plan)
+      const researchPath = join(dirname(cfg.progressFile), 'research.md')
+      let trustList = ''
+      let priorLedger = ''
+      if (dc.ledger) {
+        const trustPath = join(dirname(cfg.progressFile), 'trust-list.md')
+        trustList = existsSync(trustPath) ? readFileSync(trustPath, 'utf8') : ''
+        priorLedger = existsSync(researchPath) ? readFileSync(researchPath, 'utf8') : ''
+      }
+      const d = runDirectionCheck(cfg, plan, { trustList, priorLedger })
+      // Append BEFORE the pause branch below: the pause path calls process.exit(7), so a write placed
+      // after it would skip the very phase that triggered the concern. Runs on sound, warn, and pause alike.
+      if (dc.ledger) appendResearch(researchPath, basename(process.cwd()), d.findings, d.candidateSources)
       if (!d.sound) {
         direction = d
         log(`⚠ direction concern (${mdCell(d.source)}): ${mdCell(d.concern)}`)

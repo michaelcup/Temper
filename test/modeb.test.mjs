@@ -540,6 +540,63 @@ test('the notify hook fires with the failure event when a phase stops the queue'
   }
 })
 
+test('overnight with directionCheck.ledger writes a research ledger; ledger:false writes none', () => {
+  const critic = `echo '{"sound":true,"concern":"none","source":"none","findings":[{"claim":"createRoot replaces ReactDOM.render","support":"high","sources":["react.dev"],"note":"verified."}],"candidateSources":[]}'`
+  const on = setup(
+    baseCfg({ engines: { stub: { engine: APPEND_ENGINE, critic } }, directionCheck: { enabled: true, sources: ['docs/api.md'], every: 1, onMiss: 'warn', ledger: true } }),
+    [['one', 'x']],
+  )
+  try {
+    const r = temper(on, ['overnight', '.temper/phases', '--engine', 'stub'])
+    assert.equal(r.code, 0, r.out)
+    const ledger = join(on, '.temper', 'research.md')
+    assert.ok(existsSync(ledger), 'ledger:true writes the research ledger')
+    assert.match(readFileSync(ledger, 'utf8'), /createRoot replaces ReactDOM\.render/)
+    assert.match(readFileSync(ledger, 'utf8'), /Support: high\. Sources: \[react\.dev\]/)
+  } finally {
+    rmSync(on, { recursive: true, force: true })
+  }
+  const off = setup(
+    baseCfg({ engines: { stub: { engine: APPEND_ENGINE, critic } }, directionCheck: { enabled: true, sources: ['docs/api.md'], every: 1, onMiss: 'warn' } }),
+    [['one', 'x']],
+  )
+  try {
+    temper(off, ['overnight', '.temper/phases', '--engine', 'stub'])
+    assert.ok(!existsSync(join(off, '.temper', 'research.md')), 'ledger is opt-in: OFF writes no file')
+  } finally {
+    rmSync(off, { recursive: true, force: true })
+  }
+})
+
+test('with ledger on, a valid pause verdict still pauses (exit 7) and records the finding before exit', () => {
+  const critic = `echo '{"sound":false,"concern":"superseded pattern","source":"SPEC.md","findings":[{"claim":"pattern X is superseded","support":"high","sources":["SPEC.md"],"note":"use Y."}]}'`
+  const dir = setup(
+    baseCfg({ engines: { stub: { engine: APPEND_ENGINE, critic } }, directionCheck: { enabled: true, sources: ['SPEC.md'], every: 1, onMiss: 'pause', ledger: true } }),
+    [['one', 'x'], ['two', 'y']],
+  )
+  try {
+    const r = temper(dir, ['overnight', '.temper/phases', '--engine', 'stub'])
+    assert.equal(r.code, 7, r.out) // verdict still authoritative
+    assert.match(readFileSync(join(dir, '.temper', 'research.md'), 'utf8'), /pattern X is superseded/, 'the paused phase still recorded its finding (write precedes the exit)')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('with ledger on, non-JSON critic output fails open (commits) and writes no ledger content', () => {
+  const dir = setup(
+    baseCfg({ engines: { stub: { engine: APPEND_ENGINE, critic: `echo 'totally not json'` } }, directionCheck: { enabled: true, sources: ['docs/api.md'], every: 1, onMiss: 'pause', ledger: true } }),
+    [['one', 'x']],
+  )
+  try {
+    const r = temper(dir, ['overnight', '.temper/phases', '--engine', 'stub'])
+    assert.equal(r.code, 0, r.out) // fail-open: a glitch never blocks the queue
+    assert.ok(!existsSync(join(dir, '.temper', 'research.md')), 'a fail-open verdict appends nothing')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('a failed overnight phase is cleaned up: HEAD restored to base and the tree left clean', () => {
   // The engine drops an OUT-OF-SCOPE untracked artifact → scope violation → maxed. The exit-restore
   // must reset + clean it and return to base, so the next run starts from a clean base tree.
