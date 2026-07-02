@@ -1,6 +1,6 @@
 {
   "name": "@michaelrowejones/temper",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "type": "module",
   "description": "Thin, engine-agnostic, entropy-gated loop runner for AI coding. Drives Claude Code or Codex in a loop on one approved Plan and commits only work that passed a deterministic gate.",
   "keywords": ["ai", "coding-agent", "claude-code", "codex", "llm", "loop-runner", "code-quality", "cli"],
