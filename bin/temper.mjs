@@ -316,6 +316,27 @@ function explain(gate) {
   log(`How to clear:  ${fix}`)
 }
 
+function usage() {
+  log(
+    'Temper — entropy-gated loop runner\n\n' +
+      '  temper run <plan.md>          run one approved Plan to a green gate\n' +
+      '  temper overnight <dir>        work an ordered queue of Plans unattended — own branch + morning report\n\n' +
+      '  temper plan "<task>"          draft a Plan from the codebase to approve (--template drops a blank one, no engine)\n' +
+      '  temper tasks <file>           draft a scoped Plan per task line into the queue (add "<task>" to append one)\n' +
+      '  temper audit [dir]            scan with fallow + draft dead-code cleanup Plans into .temper/audit (--json prints findings, writes no Plans)\n' +
+      '  temper init [--agents]        scaffold config; --agents wires the Claude Code / Codex skill\n' +
+      '  temper status                 summarize the current/last queue from the ledger\n' +
+      '  temper plan-check <dir>       flag plans whose scopes claim the same file (--reconcile adds an LLM suggestion)\n' +
+      '  temper explain <gate>         what a gate/verdict means + how to clear it\n' +
+      '  temper doctor                 check prerequisites\n' +
+      '  temper eval                   run the golden-task regression suite\n' +
+      '  temper --version              print the version\n\n' +
+      'Flags: --engine <name>, --max-iterations <n>; overnight adds --branch <b>, --keep-going, --max-queue-seconds/-iterations <n>.\n' +
+      'overnight isolates the queue on its own branch (never main, never merged) + writes a report.\n' +
+      'Engines live in temper.config.json (presets: claude, codex); set "criticEngine" for cross-model review.\n',
+  )
+}
+
 function main() {
   const { positionals, flags } = parseArgs(process.argv.slice(2))
   // `--version`/`-v` before any config load, so it works outside a repo. Read package.json relative to THIS
@@ -323,6 +344,12 @@ function main() {
   if (flags.version || positionals[0] === '-v') {
     const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
     console.log(version)
+    process.exit(0)
+  }
+  // `--help` anywhere, or `help`/`-h` as the command, before any config load or dispatch — so
+  // `temper run --help` prints usage instead of starting a real run against ./PLAN.md.
+  if ('help' in flags || positionals[0] === 'help' || positionals[0] === '-h') {
+    usage()
     process.exit(0)
   }
   const [cmd, arg] = positionals
@@ -383,24 +410,10 @@ function main() {
     resolveEngines(cfg, flags.engine)
     doctor(cfg)
   } else {
-    log(
-      'Temper — entropy-gated loop runner\n\n' +
-        '  temper run <plan.md>          run one approved Plan to a green gate\n' +
-        '  temper overnight <dir>        work an ordered queue of Plans unattended — own branch + morning report\n\n' +
-        '  temper plan "<task>"          draft a Plan from the codebase to approve (--template drops a blank one, no engine)\n' +
-        '  temper tasks <file>           draft a scoped Plan per task line into the queue (add "<task>" to append one)\n' +
-        '  temper audit [dir]            scan with fallow + draft dead-code cleanup Plans into .temper/audit (--json prints findings, writes no Plans)\n' +
-        '  temper init [--agents]        scaffold config; --agents wires the Claude Code / Codex skill\n' +
-        '  temper status                 summarize the current/last queue from the ledger\n' +
-        '  temper plan-check <dir>       flag plans whose scopes claim the same file (--reconcile adds an LLM suggestion)\n' +
-        '  temper explain <gate>         what a gate/verdict means + how to clear it\n' +
-        '  temper doctor                 check prerequisites\n' +
-        '  temper eval                   run the golden-task regression suite\n' +
-        '  temper --version              print the version\n\n' +
-        'Flags: --engine <name>, --max-iterations <n>; overnight adds --branch <b>, --keep-going, --max-queue-seconds/-iterations <n>.\n' +
-        'overnight isolates the queue on its own branch (never main, never merged) + writes a report.\n' +
-        'Engines live in temper.config.json (presets: claude, codex); set "criticEngine" for cross-model review.\n',
-    )
+    usage()
+    // An UNKNOWN command exits 1 (a typo like `temper urn` must not read as success in a script);
+    // a bare `temper` is someone asking what this is — usage, exit 0.
+    if (cmd !== undefined) process.exit(1)
   }
 }
 
