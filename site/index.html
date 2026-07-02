@@ -288,8 +288,8 @@
       <div class="bar"><i></i><i></i><i></i><span>bash</span>
         <button class="copy" style="margin-left:auto" onclick="navigator.clipboard.writeText(this.closest('.term').querySelector('pre').innerText);this.textContent='copied'">copy</button>
       </div>
-<pre><span class="c"># one-time: clone, then put `temper` on your PATH</span>
-git clone https://github.com/michaelrowejones/Temper && cd Temper && npm link
+<pre><span class="c"># one-time: install from npm</span>
+npm i -g @michaelrowejones/temper
 
 <span class="c"># from inside the repo you want to work on:</span>
 temper init                       <span class="c"># entry-point-aware gate config</span>

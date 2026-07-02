@@ -76,8 +76,9 @@ gate; without it, Temper runs the loop on the other gates and skips that one. `t
 everything.
 
 ```bash
-# one-time: clone, then put `temper` on your PATH
-git clone https://github.com/michaelrowejones/Temper && cd Temper && npm link
+# one-time: install from npm
+npm i -g @michaelrowejones/temper
+# (contributing? clone https://github.com/michaelrowejones/Temper and `npm link` instead)
 
 # then, from inside the repo you want to work on:
 temper doctor                         # check prerequisites
