@@ -133,7 +133,9 @@ test('the morning report confirms an ADDITIVE same-file overlap as harmless, not
 })
 
 test('the morning report FLAGS a real conflict when a later phase rewrites a shared file', () => {
-  const OVERWRITE = `sh -c 'echo "export const V = $RANDOM" > src/v.mjs'` // replaces the file → deletes prior lines
+  // replaces the file → deletes prior lines. $$ (each engine call is a fresh sh, so it differs per
+  // phase), NOT $RANDOM: ubuntu's /bin/sh is dash, where $RANDOM expands to empty (invalid JS → red CI).
+  const OVERWRITE = `sh -c 'echo "export const V = $$" > src/v.mjs'`
   const dir = setup(baseCfg({ engines: { stub: { engine: OVERWRITE, critic: 'true' } } }), [
     ['one', 'x', ['src/v.mjs']],
     ['two', 'y', ['src/v.mjs']],

@@ -20,10 +20,11 @@ function hitRateLimit(cfg, out) {
   // Match per LINE, anchored to the line start (after stripping quote/bullet noise). A real cap
   // BANNER begins with one of these phrases; the engine/critic merely *mentioning* a phrase in
   // prose — or this repo's own source containing the strings — does NOT start a line with it.
-  const pats = cfg.rateLimit.patterns.map((p) => p.toLowerCase())
-  return out
-    .toLowerCase()
-    .replace(/[’‘]/g, "'") // Codex prints curly apostrophes ("You’ve hit…"); patterns are ASCII
+  // Normalize curly apostrophes on BOTH sides (Codex prints "You’ve hit…", and a user pattern
+  // copy-pasted from a terminal carries the same curly quote), so neither side can silently miss.
+  const dequote = (s) => s.toLowerCase().replace(/[’‘]/g, "'")
+  const pats = cfg.rateLimit.patterns.map(dequote)
+  return dequote(out)
     .split('\n')
     .some((line) => {
       const t = line.replace(/^[\s"'>*•\-]+/, '')
