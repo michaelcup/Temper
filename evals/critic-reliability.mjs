@@ -85,4 +85,13 @@ for (let i = 0; i < 4; i++) {
   process.stdout.write(f ? 'FLIP ' : 'ok ')
 }
 console.log(`\n\n${correctCount}/${cases.length} cases correct · no-op refactor flipped ${flips}/4 extra runs (expect 0)`)
-process.exit(correctCount === cases.length && flips === 0 ? 0 : 1)
+
+// Record a fully-green pass so the release checklist (RELEASE.md) can point at evidence with a date,
+// instead of trusting that someone ran this since the critic prompt or the underlying model last changed.
+const green = correctCount === cases.length && flips === 0
+if (green) {
+  const record = { date: new Date().toISOString().slice(0, 10), critic: cfg.criticName, cases: `${correctCount}/${cases.length}`, noopFlips: `${flips}/4` }
+  writeFileSync(new URL('./critic-check-last-pass.json', import.meta.url), JSON.stringify(record, null, 2) + '\n')
+  console.log('recorded the pass in evals/critic-check-last-pass.json — commit it.')
+}
+process.exit(green ? 0 : 1)
