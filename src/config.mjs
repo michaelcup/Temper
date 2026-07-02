@@ -46,7 +46,9 @@ export const DEFAULTS = {
     // Phrases that BEGIN a cap line (matched at line-start, case-insensitive — see hitRateLimit).
     // Line-anchored so the engine/critic merely *mentioning* a cap phrase in prose (or this repo's
     // own source) doesn't trigger a spurious wait. Tune per CLI.
-    patterns: ['claude usage limit reached', 'claude ai usage limit reached', 'usage limit reached', '5-hour limit reached', "you've reached your usage limit", 'you have reached your usage limit', 'out of extra usage'],
+    // Claude wordings, then Codex ("You've hit your usage limit. Try again in 3h…" /
+    // "You've reached your 5-hour message limit."). Curly apostrophes are normalized in hitRateLimit.
+    patterns: ['claude usage limit reached', 'claude ai usage limit reached', 'usage limit reached', '5-hour limit reached', "you've reached your usage limit", 'you have reached your usage limit', 'out of extra usage', "you've hit your usage limit", "you've reached your 5-hour message limit"],
     marginSeconds: 60, // wait this much PAST the parsed reset, for clock skew
     fallbackSeconds: 1800, // if no reset time is parseable, wait this long, then re-check
     maxWaitSeconds: 21600, // cap a SINGLE wait at this (6h)

@@ -189,7 +189,8 @@ export function runPlanDraft(cfg, task, outPath, force) {
   if (existsSync(out) && !force) {
     fail(`${out} already exists — pass --force to overwrite, or --out <path> to write elsewhere.`)
   }
-  log(`▶ drafting a Plan for: ${task}\n`)
+  log(`▶ drafting a Plan for: ${task}`)
+  log('  the engine is exploring the codebase — this typically takes a few minutes and prints nothing until done (Ctrl-C aborts)\n')
   const planText = draftPlan(cfg, task)
   writeFileSync(out, planText)
   log(`✓ draft written to ${out}`)

@@ -257,11 +257,11 @@ function doctor(cfg) {
     log('  process; depending on the host it may not reach your terminal\'s subscription auth. If a run')
     log('  fails to authenticate, run it from a plain terminal instead.')
   }
-  // Codex caps are worded differently from Claude's, and the default rateLimit.patterns are Claude-worded, so
-  // an un-tuned Codex run would escalate on a cap instead of sleeping + resuming. Nudge codex users to verify.
+  // The default rateLimit.patterns cover Claude's and Codex's current cap wording, but CLIs reword
+  // banners between releases; an unmatched cap escalates instead of sleeping + resuming.
   if (cfg.engine === 'codex' || cfg.criticEngine === 'codex') {
-    log("\nℹ Using the `codex` engine: verify `rateLimit.patterns` in temper.config.json match Codex's cap")
-    log('  wording (the defaults are Claude-worded), or a Codex cap will escalate instead of sleeping + resuming.')
+    log('\nℹ Using the `codex` engine: the default `rateLimit.patterns` cover its current cap wording. If a')
+    log('  cap ever escalates instead of sleeping + resuming, update the patterns in temper.config.json.')
   }
   warnFallowOutsideRepo(cfg.fallowCommand)
   log(`\nengine (${cfg.engineName}): ${cfg.engineCommand}`)

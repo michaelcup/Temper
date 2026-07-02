@@ -23,6 +23,7 @@ function hitRateLimit(cfg, out) {
   const pats = cfg.rateLimit.patterns.map((p) => p.toLowerCase())
   return out
     .toLowerCase()
+    .replace(/[’‘]/g, "'") // Codex prints curly apostrophes ("You’ve hit…"); patterns are ASCII
     .split('\n')
     .some((line) => {
       const t = line.replace(/^[\s"'>*•\-]+/, '')
@@ -34,6 +35,16 @@ function hitRateLimit(cfg, out) {
 // null when nothing parseable OR the parsed time is implausibly far off (a misparse / wrong
 // day-rollover), so the caller falls back to periodic re-checks instead of one giant overshoot.
 function parseResetSeconds(text, now = new Date()) {
+  // Codex words the reset as a DURATION ("Try again in 3h" / "try again in 4 days 2 hours 46 minutes").
+  // An explicit duration is not a misparse risk, so return it as-is; the caller clamps at maxWaitSeconds.
+  const dur = text.match(/try again in\s+((?:\d+\s*(?:d(?:ays?)?|h(?:ours?|rs?)?|m(?:in(?:utes?)?)?|s(?:ec(?:onds?)?)?)\s*)+)/i)
+  if (dur) {
+    let secs = 0
+    for (const [, n, unit] of dur[1].matchAll(/(\d+)\s*([dhms])/gi)) {
+      secs += parseInt(n, 10) * { d: 86400, h: 3600, m: 60, s: 1 }[unit.toLowerCase()]
+    }
+    if (secs > 0) return secs
+  }
   const m = text.match(/reset[s]?(?:\s+at)?\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i)
   if (!m) return null
   let hour = parseInt(m[1], 10)

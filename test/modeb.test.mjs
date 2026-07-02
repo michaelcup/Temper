@@ -378,6 +378,34 @@ test('a subscription cap is detected and the run sleeps then resumes', () => {
   }
 })
 
+test("a Codex-worded cap (curly apostrophe, 'try again in <duration>') is detected and the parsed duration is slept", () => {
+  // Codex's banner: "You’ve hit your usage limit. Try again in 3h…" — curly apostrophe, duration reset.
+  const marker = join(mkdtempSync(join(tmpdir(), 'temper-rlcdx-')), 'm')
+  const engine = `sh -c 'if [ -f ${marker} ]; then echo "// work $RANDOM" >> src/v.mjs; else touch ${marker}; echo "You’ve hit your usage limit. Try again in 2 seconds."; fi'`
+  const dir = setup(
+    {
+      engines: { stub: { engine, critic: "echo '{}'" } },
+      engine: 'stub',
+      fallowCommand: 'true',
+      criticMode: 'off',
+      // fallback deliberately ≠ the parsed duration, and the cumulative ceiling clamps it to 5s, so a
+      // regression in the duration parse shows up as "Sleeping 5s" (and a hang is impossible).
+      rateLimit: { marginSeconds: 0, fallbackSeconds: 600, maxQueueWaitSeconds: 5 },
+    },
+    [['rlx', 'work']],
+  )
+  try {
+    const r = temper(dir, ['run-phases', '.temper/phases', '--engine', 'stub'])
+    assert.equal(r.code, 0, r.out)
+    assert.match(r.out, /subscription cap hit/, 'the Codex wording should be detected as a cap')
+    assert.match(r.out, /Sleeping 2s/, 'the "try again in 2 seconds" duration should be parsed, not the fallback')
+    assert.match(r.out, /all 1 phases green/, 'it should resume and commit after the wait')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+    rmSync(dirname(marker), { recursive: true, force: true })
+  }
+})
+
 test('status summarizes the ledger after a run', () => {
   const dir = setup(baseCfg(), [['one', 'x']])
   try {

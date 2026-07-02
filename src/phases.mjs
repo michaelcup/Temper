@@ -466,7 +466,8 @@ export function runTasks(cfg, taskFile, dir) {
   mkdirSync(dir, { recursive: true })
   const existing = readdirSync(dir).filter((f) => f.endsWith('.md'))
   if (existing.length) fail(`${dir} already holds ${existing.length} plan(s) — clear it or pass a fresh --dir, so drafting can't clobber a queue in progress.`)
-  log(`drafting ${tasks.length} task(s) into ${dir} (read-only; review + approve each before running)…\n`)
+  log(`drafting ${tasks.length} task(s) into ${dir} (read-only; review + approve each before running)…`)
+  log('each draft explores the codebase — expect a few silent minutes per task\n')
   const phases = []
   tasks.forEach((task, i) => {
     const slug = task.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'task'
