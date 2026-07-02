@@ -6,10 +6,11 @@ it should **show a gate catching bad work** — that is the whole point, and it 
 The catch: Temper's gates are a safety net that rarely fires when the engine does a good job, so a
 random recording just shows a clean commit. The two recipes below deliberately set up a scene where a
 gate *will* fire on camera. **A** is the impressive one (not 100% guaranteed); **B** fires every time.
+Each has a one-command setup script; run it, then record.
 
 ## Prerequisites
 
-- `temper` on your PATH (`cd /path/to/Temper && npm link`).
+- `temper` on your PATH (`npm i -g @michaelrowejones/temper`).
 - `fallow` installed and resolvable (`temper doctor` will confirm).
 - A logged-in engine (`claude` or `codex`) in this terminal — Temper uses your real subscription.
 - The recorder: `brew install asciinema agg` (`asciinema` records; `agg` renders the cast to a GIF).
@@ -20,40 +21,8 @@ The agent re-implements something that already exists under a new name; Temper's
 catches it after every deterministic gate has passed.
 
 ```bash
-mkdir temper-demo && cd temper-demo && git init -q
-git config user.email demo@local && git config user.name demo
-mkdir src test
-cat > src/text.mjs <<'EOF'
-export function slugify(s) {
-  return s.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
-}
-EOF
-cat > test/text.test.mjs <<'EOF'
-import { test } from 'node:test'; import assert from 'node:assert'
-import { slugify } from '../src/text.mjs'
-test('slugify', () => assert.equal(slugify('Hello World!'), 'hello-world'))
-EOF
-git add -A && git commit -qm "seed: text utils"
-
-temper init                                   # entry-aware fallow config (avoids the new-export footgun)
-sed -i.bak 's/"criticMode": "warn"/"criticMode": "halt"/' temper.config.json && rm -f temper.config.json.bak
-git add -A && git commit -qm "chore: temper config (criticMode: halt)"
-
-cat > PLAN.md <<'EOF'
----
-scope:
-  - "src/url.mjs"
-  - "test/url.test.mjs"
-acceptance: "node --test test/url.test.mjs"
----
-# Add a URL-path helper
-## Goal
-Add `toUrlPath(title)` in src/url.mjs that lowercases a page title and turns spaces and
-punctuation into single hyphens (no leading/trailing hyphens). Add a test in test/url.test.mjs.
-## Steps
-1. Create src/url.mjs exporting toUrlPath.
-2. Add test/url.test.mjs covering it.
-EOF
+sh docs/demo-setup-a.sh ~/tmp/temper-demo    # seeds slugify + a Plan that tempts a re-implementation
+cd ~/tmp/temper-demo
 ```
 
 Record the full reject → fix → commit arc in one cast:
@@ -76,36 +45,8 @@ You ask the agent to rewrite a function that is locked behind a `temper:protect`
 *forces* editing the locked code, so the gate rejects every attempt and Temper escalates to you.
 
 ```bash
-mkdir temper-demo-b && cd temper-demo-b && git init -q
-git config user.email demo@local && git config user.name demo
-mkdir src test
-cat > src/pricing.mjs <<'EOF'
-// temper:protect-start formula
-export function total(items) {
-  return items.reduce((sum, i) => sum + i.price, 0)
-}
-// temper:protect-end
-EOF
-cat > test/pricing.test.mjs <<'EOF'
-import { test } from 'node:test'; import assert from 'node:assert'
-import { total } from '../src/pricing.mjs'
-test('total', () => assert.equal(total([{ price: 2 }, { price: 3 }]), 5))
-EOF
-temper init && git add -A && git commit -qm "seed: pricing with a locked formula"
-
-cat > PLAN.md <<'EOF'
----
-scope:
-  - "src/pricing.mjs"
-acceptance: "node --test test/pricing.test.mjs"
----
-# Rewrite total() as a for-loop
-## Goal
-Rewrite `total` in src/pricing.mjs to use an explicit for-loop instead of reduce.
-## Steps
-1. Replace the reduce with a for-loop in total().
-EOF
-
+sh docs/demo-setup-b.sh ~/tmp/temper-demo-b   # seeds a locked total() + a Plan that must edit it
+cd ~/tmp/temper-demo-b
 asciinema rec demo.cast -c "temper run PLAN.md"
 #   → the engine edits total() (inside temper:protect) → the protected-region gate REJECTS every
 #     attempt → Temper escalates: "you asked me to change locked code." Guaranteed on camera.
