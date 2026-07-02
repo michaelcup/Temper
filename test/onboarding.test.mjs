@@ -143,6 +143,8 @@ test('temper run fails fast when the acceptance command has a shell syntax error
   // it as a failing test, burning iterations to an escalation. Catch it at validation instead.
   const acc = 'acceptance: "node -e \\"import {x} from \'./src/v.mjs\'; console.log(\'ok\')\\""'
   writeFileSync(join(dir, 'PLAN.md'), `---\nscope:\n  - "src/**"\n${acc}\n---\n# t\nx\n`)
+  // a stub engine so the test exercises the acceptance validation, not the engine-binary preflight (CI has no claude)
+  writeFileSync(join(dir, 'temper.config.json'), JSON.stringify({ engines: { stub: { engine: 'true', critic: 'true' } }, engine: 'stub', fallowCommand: 'true', criticMode: 'off' }))
   g(['init', '-q'])
   g(['config', 'user.email', 'a@b.c'])
   g(['config', 'user.name', 'a'])

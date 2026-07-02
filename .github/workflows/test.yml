@@ -1,0 +1,30 @@
+name: Tests
+
+# Runs the deterministic suite (temper eval + node --test) on every push and PR.
+# The suite uses stub engines and a fake fallow, so it needs no claude/codex/fallow
+# and no secrets; it is the same `npm test` you run locally.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [18, 20, 22]
+    name: node ${{ matrix.node }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: git config --global user.email ci@temper.test && git config --global user.name ci
+      - run: npm test

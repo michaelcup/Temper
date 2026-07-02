@@ -1,5 +1,8 @@
 # Temper
 
+[![Tests](https://github.com/michaelrowejones/Temper/actions/workflows/test.yml/badge.svg)](https://github.com/michaelrowejones/Temper/actions/workflows/test.yml)
+[![npm](https://img.shields.io/npm/v/%40michaelrowejones%2Ftemper)](https://www.npmjs.com/package/@michaelrowejones/temper)
+
 > AI agents are fast, but they leave a mess and ignore the structure you built. Temper puts hard limits on what your coding agent can touch and commits only work that holds up.
 
 **Let your coding agent loop, and commit only what survives the gate.** The work that reaches your
